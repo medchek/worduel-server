@@ -1,3 +1,5 @@
+import { joinRoute } from "./../routes/joinRoute";
+import { EventDispatcher } from "./EventDispatcher";
 // express
 import express, { Express } from "express";
 import { createServer, IncomingMessage, Server } from "http";
@@ -39,13 +41,20 @@ interface VerifiedReqUrlResponse {
   id: string | number;
 }
 
+interface Message {
+  event: string;
+  message: string;
+  code?: number;
+}
+
 export class GameServer {
   private app: Express;
   private server: Server;
   private ws: WebSocket.Server;
+  private dispatch = new EventDispatcher();
 
-  private playerList: PlayerManager = new PlayerManager();
-  private roomList: RoomManager = new RoomManager();
+  public playerList: PlayerManager = new PlayerManager();
+  public roomList: RoomManager = new RoomManager();
 
   private wsGlobalRateLimit: RateLimiterMemory = new RateLimiterMemory({
     points: 10, // max requests
@@ -75,10 +84,8 @@ export class GameServer {
         },
       })
     );
-    // inform people how try to access the http server
-    this.app.get("/", (req, res) => {
-      res.status(403).send("Access denied");
-    });
+    // handle http join room request, to check for room existance and availability
+
     // create and attach express to the http server
     this.server = createServer(this.app);
     // create the websocket server
@@ -100,6 +107,7 @@ export class GameServer {
    *
    ************************************************************************************************/
   private core(): void {
+    this.app.use(joinRoute(this.roomList));
     this.handleServerUpgrade();
     this.handleSocketConnection();
   }
@@ -108,7 +116,7 @@ export class GameServer {
    */
   private handleSocketConnection(): void {
     this.ws.on("connection", async (socket, req) => {
-      // rate limiting
+      // rate limitingu
       try {
         await this.wsGlobalRateLimit.consume(
           req.socket.remoteAddress as string, // this will be verified to never be undefined in the verifyClientHeaders, hence the type cast.
@@ -129,31 +137,29 @@ export class GameServer {
              * TODO : create or join a room
              *
              */
-
+            // * create romm request
             if (requestType === "create") {
               this.roomList
                 .createNewRoom({
                   gameId: id,
                   requestedBy: player,
                 })
-                .then((roomId) => {
+                .then((room) => {
                   // # when the room is successfully created
-                  console.log("createNewRoom() room created =>", roomId);
-                  player.socket.send(
-                    JSON.stringify({
-                      event: "roomCreated",
-                      roomId: player.joinedRoomId,
-                      playerId: player.id,
-                    })
-                  );
-                  console.log(this.roomList.getRoom(roomId));
+                  console.log("createNewRoom() room created =>", room.id);
+                  setTimeout(() => {
+                    this.dispatch.roomCreated(player, room);
+                  }, 1000);
                 })
                 .catch((err) => {
                   console.error("createNewRoom() error => ", err);
                 });
             } else {
+              // * Join romm request
               console.log("joining");
             }
+
+            //---------------------------------------
             this.onMessage(player, req);
 
             this.onError(player);
@@ -176,20 +182,16 @@ export class GameServer {
 
         // `Too many connection attempts, you have been blocked for ${remainingTime} minutes`
         socket.send(
-          this.sendJson(
-            "You have been temporarily suspended due to unexpected behavior, please try again later"
-          )
+          this.sendJson({
+            event: "TooManyAttempts",
+            message:
+              "You have been temporarily suspended due to too many connection attempts, please try again later",
+          })
         );
         socket.close();
       }
     });
     // test
-  }
-
-  onOpen(socket: WebSocket): void {
-    socket.on("open", () => {
-      console.log("onOpen!");
-    });
   }
 
   /**
@@ -201,25 +203,44 @@ export class GameServer {
     const socket = player.socket;
 
     socket.on("message", (messageData) => {
-      // first check if the player (client) is allowed to send messages
-      if (!player.canSendMessages) return;
-      console.log("message received"); // check if the message event is working
-      // any suspecious data content should terminate the socket connection
+      return new Promise((resolve, reject) => {
+        // first check if the player (client) is allowed to send messages
+        if (!player.canSendMessages) {
+          console.warn("player cannot yet send messages");
+          reject();
+          return;
+        }
+        console.log("message received"); // checks if the message event is working
+        // any suspecious data content should terminate the socket connection
 
-      // if the message is of type string and its length does not exceed 255
-      if (
-        typeof messageData === "string" &&
-        messageData.length <= 255 &&
-        messageData.length > 0
-      ) {
-        // check if the message is valid json
-        try {
-          const clientEvent = JSON.parse(messageData);
-          // the data received should have a valid type by now,
-          // furthre check the validity of data
+        // if the message is of type string and its length does not exceed 255
+        if (
+          typeof messageData === "string" &&
+          messageData.length <= 255 &&
+          messageData.length > 0
+        ) {
+          // check if the message is valid json
+          try {
+            const clientEvent = JSON.parse(messageData);
+            // the data received should have a valid type by now,
+            // furthre check the validity of data
 
-          socket.send(JSON.stringify(clientEvent));
-        } catch (err) {
+            socket.send(JSON.stringify(clientEvent));
+            resolve(clientEvent);
+          } catch (err) {
+            this.terminateSocket({
+              socket,
+              block: {
+                ip: req.socket.remoteAddress as string,
+                blockDurationSeconds: 60 * 60,
+              },
+            });
+            reject();
+            console.error("onMessage() => invalid json", err);
+          }
+        } else {
+          console.log("message checking failed");
+          // on check fail
           this.terminateSocket({
             socket,
             block: {
@@ -227,20 +248,9 @@ export class GameServer {
               blockDurationSeconds: 60 * 60,
             },
           });
-          console.error("onMessage() => invalid json", err);
+          reject();
         }
-      } else {
-        console.log("message checking failed");
-        // on check fail
-        this.terminateSocket({
-          socket,
-          block: {
-            ip: req.socket.remoteAddress as string,
-            blockDurationSeconds: 60 * 60,
-          },
-        });
-        return;
-      }
+      });
     });
   }
 
@@ -262,11 +272,8 @@ export class GameServer {
    * @param type the type of message (error, success, message).
    * @returns a stringified JSON object.
    */
-  private sendJson(message: string, type = "error"): string {
-    return JSON.stringify({
-      type,
-      message,
-    });
+  private sendJson(json: Message): string {
+    return JSON.stringify(json);
   }
 
   /**

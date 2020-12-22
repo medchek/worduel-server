@@ -6,6 +6,16 @@ interface PlayerOptions {
   username: string;
 }
 
+// a member is similar to the player interface but is entended to be exposed to the client
+// it contains none sensetive player data
+export interface Member {
+  username: string;
+  id: string;
+  score: number;
+  isLeader: boolean;
+  isTurn: boolean;
+}
+
 // export class Player<WebSocket> {
 export class Player {
   private _socket: WebSocket;
@@ -15,6 +25,10 @@ export class Player {
   private _joinedAt: number;
   private _joinedRoomId: string | undefined;
   private _canSendMessages = false; // if the client player can send messages
+  // Game options
+  private _score = 0;
+  private _isTurn = false;
+  private _isLeader = false;
 
   // constructor(rawSocket: WebSocket, request: IncomingMessage) {
   constructor(socket: WebSocket, request: IncomingMessage, options: PlayerOptions) {
@@ -33,6 +47,9 @@ export class Player {
   get id(): string {
     return this._id;
   }
+  get username(): string {
+    return this._username;
+  }
   get ip(): string {
     return this._ip;
   }
@@ -41,6 +58,29 @@ export class Player {
   }
   get joinedRoomId(): string | undefined {
     return this._joinedRoomId;
+  }
+  get score(): number {
+    return this._score;
+  }
+  get isTurn(): boolean {
+    return this._isTurn;
+  }
+  get isLeader(): boolean {
+    return this._isLeader;
+  }
+  /**
+   * A Player object intented to be sent to the client.
+   * @return non-sensitive data (i.e. without socket object, ip..etc) about the player.
+   *
+   */
+  get asMember(): Member {
+    return {
+      id: this._id,
+      username: this._username,
+      score: this._score,
+      isLeader: this._isLeader,
+      isTurn: this._isTurn,
+    };
   }
 
   setPlayerJoinedRoom(roomId: string): void {

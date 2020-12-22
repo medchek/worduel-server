@@ -50,13 +50,17 @@ export class RoomManager {
   getRoom(roomId: string): Room | undefined {
     return this.roomList.get(roomId);
   }
+
+  hasRoom(roomId: string): boolean {
+    return this.roomList.has(roomId);
+  }
   /**
    * creates a new room based on the data provided in the options
    * @param options CreateRoomOptions interface
    * @returns Promise - on success, returns the created room id.
    * On error, the promise rejects with an error object containing an error code and the duration the users should be blocked for
    */
-  createNewRoom(options: CreateRoomOptions): Promise<string> {
+  createNewRoom(options: CreateRoomOptions): Promise<Room> {
     return new Promise((resolve, reject) => {
       const { requestedBy, gameId, maxSlots, roundCount } = options;
       // generate a random unique room id
@@ -65,7 +69,7 @@ export class RoomManager {
       // TODO: CHECK FOR IP IF IT HAS CREATED/JOINED ROOM
       if (!requestedBy.joinedRoomId) {
         const createRoomOptions: RoomOptions = {
-          createdBy: requestedBy,
+          requestedBy: requestedBy,
           gameId: typeof gameId === "string" ? toInt(gameId) : gameId,
           id: roomId,
           roundCount,
@@ -74,7 +78,11 @@ export class RoomManager {
         // load the game class that according to the gameId
         // where 1: Shuffler, 2: ToBeImplemented...etc
         if (gameId === 1) {
-          this.roomList.set(roomId, new Shuffler(createRoomOptions));
+          const gameRoom = new Shuffler(createRoomOptions);
+          this.roomList.set(roomId, gameRoom);
+          // set the player as having joined a room so as to prevent any further room join or create
+          requestedBy.setPlayerJoinedRoom(roomId);
+          resolve(gameRoom);
         } else {
           // if the gameId is not allowed/recognzied,
           console.error(new Error("RoomManager.createNewRoom() => Invalid gameId"));
@@ -85,10 +93,8 @@ export class RoomManager {
           });
           return;
         }
-        // set the player as having joined a room so as to prevent any further room join or create
-        requestedBy.setPlayerJoinedRoom(roomId);
+
         // # RESOLVE
-        resolve(roomId);
       } else {
         console.error(
           new Error("RoomManager.createNewRoom() => Player is already in a Room")
