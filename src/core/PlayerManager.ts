@@ -47,14 +47,20 @@ export class PlayerManager {
 
     return player;
   }
-
+  /**
+   * Removes the player from the player list, and optionally closes the socket if it is still open.
+   * @param options Option object containing the player Id and terminateSocket boolean indicating wheter to close the socket or not.
+   */
   removePlayer(options: RemovePlayerOptions): boolean {
     const { id, terminateSocket } = options;
 
     if (terminateSocket) {
       const player = this.getPlayerById(id);
       if (player) {
-        player.socket.close();
+        if (player.socket.readyState === 1) {
+          // readyState 1 = OPEN
+          player.socket.close();
+        }
       } else {
         console.error("Could not terminate socket. Player not found in list");
       }
