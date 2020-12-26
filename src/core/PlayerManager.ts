@@ -57,8 +57,10 @@ export class PlayerManager {
     if (terminateSocket) {
       const player = this.getPlayerById(id);
       if (player) {
-        if (player.socket.readyState === 1) {
-          // readyState 1 = OPEN
+        // remove the player
+        this.playerList.delete(player.id);
+        if (player.socket.readyState <= 1) {
+          // readyState 1 = OPEN, 0 = OPENNING
           player.socket.close();
         }
       } else {

@@ -1,5 +1,5 @@
 import { Player } from "./Player";
-import { Room } from "./Room";
+import { Room, PublicMembers } from "./Room";
 
 interface Message {
   event: string;
@@ -9,13 +9,14 @@ interface Message {
   roomId?: string;
   gameId?: number;
   username?: string;
+  party?: PublicMembers;
 }
 
 export class EventDispatcher {
   // constructor(private player: Player, private room: Room) {}
   // # RoomCreated
   /**
-   * Event to inform the used that the room was successfully created
+   * Event to inform the client that the room was successfully created
    * @param player the player object
    * @param room the room object
    */
@@ -27,6 +28,25 @@ export class EventDispatcher {
         roomId: room.id,
         gameId: room.gameId,
         username: player.username,
+      })
+    );
+  }
+
+  // # RoomJoined
+  /**
+   * Event to inform the client that the room was successfully joined
+   * @param player the player object
+   * @param room the room object
+   */
+  public roomJoined(player: Player, room: Room): void {
+    player.socket.send(
+      this.toJson({
+        event: "roomJoined",
+        playerId: player.id,
+        roomId: room.id,
+        gameId: room.gameId,
+        username: player.username,
+        party: room.getPublicMembers(),
       })
     );
   }

@@ -54,7 +54,7 @@ export class GameServer {
   private dispatch = new EventDispatcher();
 
   public playerList: PlayerManager = new PlayerManager();
-  public roomList: RoomManager = new RoomManager();
+  public roomList: RoomManager = new RoomManager({ eventDispatcher: this.dispatch });
 
   private wsGlobalRateLimit: RateLimiterMemory = new RateLimiterMemory({
     points: 10, // max requests
@@ -146,8 +146,8 @@ export class GameServer {
                 })
                 .then((room) => {
                   // # when the room is successfully created
-                  console.log("createNewRoom() room created =>", room.id);
                   setTimeout(() => {
+                    console.log("createNewRoom() room created =>", room.id);
                     this.dispatch.roomCreated(player, room);
                   }, 1000);
                 })
@@ -157,6 +157,19 @@ export class GameServer {
             } else {
               // * Join romm request
               console.log("joining");
+              this.roomList
+                .joinRoom({
+                  roomId: typeof id !== "string" ? id.toString() : id,
+                  requestedBy: player,
+                })
+                .then((room) => {
+                  // player.socket.send("successfully joined room");
+                  this.dispatch.roomJoined(player, room);
+                  console.log("joinedRoom() room joined!");
+                })
+                .catch((err) => {
+                  console.log("joinRoom() error =>", err);
+                });
             }
 
             //---------------------------------------
@@ -256,13 +269,14 @@ export class GameServer {
 
   private onError(player: Player): void {
     player.socket.on("error", (error) => {
-      console.error(error);
+      console.log(error);
     });
   }
 
   private onDisconnect(player: Player): void {
     player.socket.on("close", () => {
-      this.playerList.removePlayer({ id: player.id });
+      // TODO: Test the bellow method
+      this.roomList.handleRoomRemoval(player);
     });
   }
 
@@ -284,6 +298,8 @@ export class GameServer {
 
   private terminateSocket(options: TerminateSocketOpts): void {
     const { socket, message, block } = options;
+    if (socket.readyState == 2 || socket.readyState == 3) return; // return if socket is not open
+
     if (message) socket.send(JSON.stringify({ type: "error", message }));
     if (block) {
       const { ip, blockDurationSeconds } = block;
@@ -328,6 +344,7 @@ export class GameServer {
       "chrome-extension://cbcbkhdmedgianpaifchdaddpnmgnknn", // temp for dev
       "http://localhost:8080",
     ];
+
     // if the requesting socket has no ip adress, then block the connection
     if (
       !req.socket.remoteAddress ||
@@ -336,7 +353,9 @@ export class GameServer {
       !allowedOrigins.includes(req.headers.origin)
     ) {
       // socket.close();
-      console.error("CONNECTION BLOCKED. NO IP ADDRESS FROM CONNECTED SOCKET OR ORIGIN");
+      console.error(
+        "CONNECTION BLOCKED. NO IP ADDRESS FROM CONNECTED SOCKET OR INVALID ORIGIN"
+      );
       return false;
     }
 
@@ -412,16 +431,20 @@ export class GameServer {
                         username,
                       });
                       return;
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
+                    } else console.error("invalid room id");
+                  } else console.error("path not equal join or create");
+                } else console.error("username regex failure");
+              } else console.error("username or id not set/not string");
+            } else console.error("params name not username or id");
+          } else console.error("path(join/create) and/or params not set");
+        } else console.error("req.url not set");
       }
       // if any of the if statements fail, reject
-      reject(new Error("a check error occured when analysing the join/create url"));
+      reject(
+        new Error(
+          "[SERVER.ts=>verifyClientUrl()] A check error occured when analysing the join/create url"
+        )
+      );
       return;
     });
   }

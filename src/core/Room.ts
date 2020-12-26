@@ -1,4 +1,4 @@
-import { Member, Player } from "./Player";
+import { Player, PublicMember } from "./Player";
 
 export interface RoomOptions {
   maxSlots?: number;
@@ -6,6 +6,9 @@ export interface RoomOptions {
   gameId: number;
   id: string;
   requestedBy: Player;
+}
+export interface PublicMembers {
+  [id: string]: PublicMember;
 }
 
 export abstract class Room {
@@ -21,7 +24,7 @@ export abstract class Room {
   protected _timePerRound = 90;
   protected _isLobby = true;
   protected _difficulty = 1;
-  protected _members: Map<string, Member> = new Map();
+  protected _members: Map<string, Player> = new Map();
 
   // private ;
   constructor(roomOptions: RoomOptions) {
@@ -48,7 +51,7 @@ export abstract class Room {
     return this._gameId;
   }
 
-  get members(): Map<string, Member> {
+  get members(): Map<string, Player> {
     return this._members;
   }
 
@@ -61,8 +64,12 @@ export abstract class Room {
     return this._members.size >= this._maxSlots;
   }
 
+  get isEmpty(): boolean {
+    return this._members.size === 0;
+  }
+
   public addMember(player: Player): void {
-    this._members.set(player.id, player.asMember);
+    this._members.set(player.id, player);
   }
 
   public removeMember(playerId: string): boolean {
@@ -71,6 +78,7 @@ export abstract class Room {
   public clearMembers(): void {
     this._members.clear();
   }
+
   /**
    * Sets the maximum number of player for this room
    * @param max Max number of players that can join the room. Between 2 and 10 max players
@@ -81,5 +89,24 @@ export abstract class Room {
     } else {
       console.error("Room.setMaxSlot() => invalid max value");
     }
+  }
+
+  public setNewRoomLeader(): void {
+    const iterator = this._members.values();
+    // get the first available member
+    const newLeader: Player = iterator.next().value;
+    // set it as the new leader
+    newLeader.setAsLeader();
+  }
+
+  /**
+   * Get the members of the room that are intented to be sent to the client
+   */
+  public getPublicMembers(): PublicMembers {
+    const publicMembers: PublicMembers = {};
+    this.members.forEach((member, playerIdKey) => {
+      publicMembers[playerIdKey] = member.getAsPublicMember;
+    });
+    return publicMembers;
   }
 }

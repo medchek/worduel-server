@@ -8,7 +8,7 @@ interface PlayerOptions {
 
 // a member is similar to the player interface but is entended to be exposed to the client
 // it contains none sensetive player data
-export interface Member {
+export interface PublicMember {
   username: string;
   id: string;
   score: number;
@@ -73,7 +73,7 @@ export class Player {
    * @return non-sensitive data (i.e. without socket object, ip..etc) about the player.
    *
    */
-  get asMember(): Member {
+  get getAsPublicMember(): PublicMember {
     return {
       id: this._id,
       username: this._username,
@@ -83,6 +83,13 @@ export class Player {
     };
   }
 
+  disconnect(): void {
+    this._socket.close();
+  }
+
+  setAsLeader(): void {
+    this._isLeader = true;
+  }
   setPlayerJoinedRoom(roomId: string): void {
     this._joinedRoomId = roomId;
   }
