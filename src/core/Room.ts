@@ -40,7 +40,7 @@ export abstract class Room {
     this._createdBy = createdBy;
 
     // ** add the room creator to the members of the room
-    this.addMember(createdBy);
+    this.addMember(createdBy, id);
   }
 
   get id(): string {
@@ -68,7 +68,9 @@ export abstract class Room {
     return this._members.size === 0;
   }
 
-  public addMember(player: Player): void {
+  public addMember(player: Player, joinedRoomId: string): void {
+    // set the player as having joined a room so as to prevent any further room join or create
+    player.setPlayerJoinedRoom(joinedRoomId);
     this._members.set(player.id, player);
   }
 

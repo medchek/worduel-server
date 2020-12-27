@@ -45,25 +45,43 @@ export class RoomManager {
   }
 
   /**
-   * !!! This method MUST be called before using any of the other class methods
+   * !!! This method MUST be called before using any of the other class methods.
+   *
+   * This will allow this class to interact with the players manager thus making it very flexible.
    * @param playerList the player list that the room manager needs to interact with
    */
   attcahPlayerList(playerList: PlayerManager): void {
     this.playerList = playerList;
   }
 
+  /**
+   * get the room object that matches the given id
+   * @param roomId the room id
+   */
   getRoom(roomId: string): Room | undefined {
     return this.roomList.get(roomId);
   }
 
+  /**
+   * Check if the room exists
+   * @param roomId the room id
+   */
   hasRoom(roomId: string): boolean {
     return this.roomList.has(roomId);
+  }
+  /**
+   * Add the room into the room list
+   * @param roomId the room id
+   * @param gameRoom The room object, or any that extends the Room class
+   */
+  addRoom(roomId: string, gameRoom: Room): void {
+    this.roomList.set(roomId, gameRoom);
   }
 
   /**
    * creates a new room based on the data provided in the options
    * @param options CreateRoomOptions interface
-   * @returns Promise - on success, returns the created room id.
+   * @returns Promise - on success, returns the created room objcet.
    * On error, the promise rejects with an error object containing an error code and the duration the users should be blocked for
    */
   createNewRoom(options: CreateRoomOptions): Promise<Room> {
@@ -84,9 +102,7 @@ export class RoomManager {
       // where 1: Shuffler, 2: ToBeImplemented...etc
       if (gameId === 1) {
         const gameRoom = new Shuffler(createRoomOptions);
-        this.roomList.set(roomId, gameRoom);
-        // set the player as having joined a room so as to prevent any further room join or create
-        requestedBy.setPlayerJoinedRoom(roomId);
+        this.addRoom(roomId, gameRoom);
         // also set it as leader since the client is the creator of the room
         requestedBy.setAsLeader();
         resolve(gameRoom);
@@ -102,24 +118,34 @@ export class RoomManager {
       }
     });
   }
-
+  /**
+   * Add the player to the room that matches the provided room id
+   * @param options JoinRoomOptions interface
+   * @returns Promise resolve: on success, returns the created room object
+   * @returns Promsie rejcet: On error (non existant room, full room), the promise rejects with an error object containing an error code and the duration the users should be blocked for
+   */
   joinRoom(options: JoinRoomOptions): Promise<Room> {
     return new Promise((resolve, reject) => {
       const { roomId, requestedBy } = options;
       const room = this.roomList.get(roomId);
       // if the the requested Socket is not part of any room and the room itself exists
       if (room) {
-        // Add the player to the room members
-        room.addMember(requestedBy);
-        // set the player as having joined a room so as to prevent any further room join or create
-        requestedBy.setPlayerJoinedRoom(room.id);
-        // # RESOLVE
-        resolve(room);
+        if (!room.isFull) {
+          // Add the player to the room members
+          room.addMember(requestedBy, room.id);
+          // # RESOLVE
+          resolve(room);
+        } else {
+          // if room is full
+          console.error(new Error("RoomManager.joinRoom() => Room is full"));
+          // = REJECT
+          return reject({ code: 403, blockSec: 3600 });
+        }
       } else {
         console.error(new Error("RoomManager.joinRoom() => Room does not exist"));
         // = REJECT
         reject({
-          code: 103,
+          code: 404,
           blockSec: 0,
         });
       }
@@ -129,7 +155,7 @@ export class RoomManager {
    * Remove a room from the list. Also disconnect and remove all the remaining players in that room.
    * @param roomId id of the room to be removed
    */
-  removeRoom(roomId: string): boolean {
+  private removeRoom(roomId: string): boolean {
     const targetRoom = this.getRoom(roomId);
     // disconenct and remove all players if there are any
     if (targetRoom) {
@@ -148,8 +174,7 @@ export class RoomManager {
    * - Remove the room if empty after the player disconnects.
    * - if not, remove only the player (also, set a new room leader if the player who disconnected was the leader).
    */
-  handleRoomRemoval(player: Player): void {
-    // FIXME: roomId might be undefined under shady usage, hence the check. Look at it before deploy
+  public handleRoomRemoval(player: Player): void {
     if (player.joinedRoomId) {
       const room = this.getRoom(player.joinedRoomId);
       if (room) {
