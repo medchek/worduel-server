@@ -1,5 +1,6 @@
+import { PlayerManager } from "./PlayerManager";
+import { RoomManager } from "./RoomManager";
 import { joinRoute } from "./../routes/joinRoute";
-import { EventDispatcher } from "./EventDispatcher";
 // express
 import express, { Express } from "express";
 import { createServer, IncomingMessage, Server } from "http";
@@ -7,13 +8,11 @@ import { Socket } from "net";
 import cors from "cors";
 import helmet from "helmet";
 import rateLimit from "express-rate-limit";
-import { RateLimiterMemory } from "rate-limiter-flexible";
+// import { RateLimiterMemory } from "rate-limiter-flexible";
 // ws
 import WebSocket from "ws";
 // core modules
 import { Player } from "./Player";
-import { PlayerManager } from "./PlayerManager";
-import { RoomManager } from "./RoomManager";
 // utils
 import colors from "colors";
 import { replaceWhiteSpaceOnce } from "./Utils";
@@ -25,6 +24,7 @@ import isInt from "validator/lib/isInt";
 import toInt from "validator/lib/toInt";
 
 import RE2 from "re2";
+import { Kernel } from "./Kernel";
 
 interface TerminateSocketOpts {
   socket: WebSocket;
@@ -47,22 +47,16 @@ interface Message {
   code?: number;
 }
 
-export class GameServer {
+export class GameServer extends Kernel {
   private app: Express;
   private server: Server;
   private ws: WebSocket.Server;
-  private dispatch = new EventDispatcher();
 
-  public playerList: PlayerManager = new PlayerManager();
-  public roomList: RoomManager = new RoomManager({ eventDispatcher: this.dispatch });
-
-  private wsGlobalRateLimit: RateLimiterMemory = new RateLimiterMemory({
-    points: 10, // max requests
-    duration: 10, // window in seconds
-    blockDuration: 60 * 60, // block period in seconds
-  });
+  private roomList: RoomManager = new RoomManager();
+  private playerList: PlayerManager = new PlayerManager();
 
   constructor() {
+    super();
     this.app = express();
     // middlewares
     // server.set("trust proxy", 1) // enable for reverse proxy (ngnix, heroku)
@@ -94,7 +88,6 @@ export class GameServer {
       clientTracking: true,
     });
 
-    // attach the corresponding lists to both classes
     this.playerList.attachRoomList(this.roomList);
     this.roomList.attcahPlayerList(this.playerList);
     // activate the core
@@ -146,9 +139,10 @@ export class GameServer {
                 })
                 .then((room) => {
                   // # when the room is successfully created
+                  // DEVONLY timeout
                   setTimeout(() => {
                     console.log("createNewRoom() room created =>", room.id);
-                    this.dispatch.roomCreated(player, room);
+                    this.eventDispatcher.roomCreated(player, room);
                   }, 1000);
                 })
                 .catch((err) => {
@@ -163,9 +157,11 @@ export class GameServer {
                   requestedBy: player,
                 })
                 .then((room) => {
-                  // player.socket.send("successfully joined room");
-                  this.dispatch.roomJoined(player, room);
-                  console.log("joinedRoom() room joined!");
+                  // DEVONLY timeout
+                  setTimeout(() => {
+                    console.log("joinedRoom() room joined!");
+                    this.eventDispatcher.roomJoined(player, room);
+                  }, 2000);
                 })
                 .catch((err) => {
                   console.log("joinRoom() error =>", err);
@@ -275,8 +271,9 @@ export class GameServer {
 
   private onDisconnect(player: Player): void {
     player.socket.on("close", () => {
-      // TODO: Test the bellow method
+      // TODO: Redesing this to be handled at the player level not the room
       this.roomList.handleRoomRemoval(player);
+      console.log(`player ${player.username}:${player.id} disconnected`);
     });
   }
 

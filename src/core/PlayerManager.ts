@@ -3,6 +3,7 @@ import WebSocket from "ws";
 import { IncomingMessage } from "http";
 import { Player } from "./Player";
 import { nanoid } from "nanoid";
+import { Kernel } from "./Kernel";
 
 interface AddPlayerOptions {
   socket: WebSocket;
@@ -14,7 +15,7 @@ interface RemovePlayerOptions {
   terminateSocket?: boolean;
 }
 
-export class PlayerManager {
+export class PlayerManager extends Kernel {
   // private playerList: Map<string, Player<WebSocket>> = new Map();
   private playerList: Map<string, Player> = new Map();
   private roomList!: RoomManager;
@@ -64,7 +65,7 @@ export class PlayerManager {
           player.socket.close();
         }
       } else {
-        console.error("Could not terminate socket. Player not found in list");
+        new Error("Could not terminate socket. Player not found in list");
       }
     }
 
@@ -72,8 +73,20 @@ export class PlayerManager {
     if (hasBeenDeleted) {
       console.log("Player sucessfully deleted from PlayerList");
     } else {
-      console.error("Could not find a player with the provided id in PlayerList");
+      new Error("Could not find a player with the provided id in PlayerList");
     }
     return hasBeenDeleted;
   }
+  // /**
+  //  * Handles players disconnection.
+  //  * - Remove the player from the list and disconnect it if not
+  //  * - Informs the client that the player has disconnected
+  //  * @param player
+  //  */
+  // handlePlayerDisconnect(player: Player): void {
+  //   // first remove handle the room removal before removing the player
+  //   this.removePlayer({ id: player.id, terminateSocket: true });
+  //   // then remove the player
+  //   this.roomList.handleRoomRemoval(player);
+  // }
 }

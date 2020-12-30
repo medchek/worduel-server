@@ -1,4 +1,3 @@
-import { EventDispatcher } from "./EventDispatcher";
 import { Shuffler } from "./games/Shuffler";
 import { nanoid } from "nanoid";
 import { Player } from "./Player";
@@ -7,10 +6,10 @@ import { Room, RoomOptions } from "./Room";
 
 // validation
 import toInt from "validator/lib/toInt";
+import { Kernel } from "./Kernel";
 // used to
 
 interface RoomListOptions {
-  eventDispatcher: EventDispatcher;
   allowSameIp?: boolean;
 }
 
@@ -28,18 +27,16 @@ interface JoinRoomOptions {
 /**
  * Class responsible for rooms creation and management.
  */
-export class RoomManager {
+export class RoomManager extends Kernel {
   private roomList: Map<string, Room> = new Map();
   private playerList!: PlayerManager;
   private ipInsideRoom: Set<string> = new Set(); // tracks the ips that are in rooms
   private allowSameIp = false;
 
-  private dispatch: EventDispatcher;
-
-  constructor(options: RoomListOptions) {
-    this.dispatch = options.eventDispatcher;
+  constructor(options?: RoomListOptions) {
+    super();
     // whether to allow the same ip to join or create multiple rooms
-    if (options.allowSameIp) {
+    if (options) {
       this.allowSameIp = options.allowSameIp || false;
     }
   }
@@ -190,11 +187,10 @@ export class RoomManager {
           // delte the player from the room members
           room.members.delete(player.id);
         }
-        console.log(room.members);
+        // delete the player from the playerList as well
+        this.playerList.removePlayer({ id: player.id, terminateSocket: true });
+        this.eventDispatcher.playerHasDisconnected(room, player);
       }
     }
-    // delete the player from the playerList as well
-    this.playerList.removePlayer({ id: player.id, terminateSocket: true });
-    console.log(this.playerList);
   }
 }
