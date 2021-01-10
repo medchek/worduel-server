@@ -14,8 +14,6 @@ interface RoomListOptions {
 }
 
 interface CreateRoomOptions {
-  maxSlots?: number;
-  roundCount?: number;
   requestedBy: Player;
   gameId: number | string;
 }
@@ -83,7 +81,7 @@ export class RoomManager extends Kernel {
    */
   createNewRoom(options: CreateRoomOptions): Promise<Room> {
     return new Promise((resolve, reject) => {
-      const { requestedBy, gameId, maxSlots, roundCount } = options;
+      const { requestedBy, gameId } = options;
       // generate a random unique room id
       const roomId = nanoid();
       // check if the player hasnt already created/joined a room,
@@ -92,8 +90,6 @@ export class RoomManager extends Kernel {
         requestedBy: requestedBy,
         gameId: typeof gameId === "string" ? toInt(gameId) : gameId,
         id: roomId,
-        roundCount,
-        maxSlots,
       };
       // load the game class that according to the gameId
       // where 1: Shuffler, 2: ToBeImplemented...etc
@@ -173,23 +169,29 @@ export class RoomManager extends Kernel {
    */
   public handleRoomRemoval(player: Player): void {
     if (player.joinedRoomId) {
+      let newLeaderId: string | null = null;
       const room = this.getRoom(player.joinedRoomId);
       if (room) {
+        // console.log("beforeRomve=>", room.getPublicMembers());
         // remove room if it's empty
         if (room.isEmpty) {
           this.removeRoom(player.joinedRoomId);
         } else {
           // otherwise, remove only the player that left from the room members
           //if the disconnected player was the creator of the room, pass the leadership to the next member of the room
-          if (player.isLeader) {
-            room.setNewRoomLeader();
+          if (room.memberCount > 1 && player.isLeader) {
+            const newLeader = room.setNewRoomLeader();
+            // in case the room creator disconnected, send the new room leader id along with the response to the client
+            newLeaderId = newLeader.id;
+            // console.log("after=> ", newLeader);
           }
           // delte the player from the room members
           room.members.delete(player.id);
         }
         // delete the player from the playerList as well
         this.playerList.removePlayer({ id: player.id, terminateSocket: true });
-        this.eventDispatcher.playerHasDisconnected(room, player);
+        this.eventDispatcher.playerHasDisconnected(room, player, newLeaderId);
+        // console.log("finally=>", room!.getPublicMembers());
       }
     }
   }

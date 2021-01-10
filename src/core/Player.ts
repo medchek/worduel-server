@@ -82,15 +82,16 @@ export class Player {
       isTurn: this._isTurn,
     };
   }
-
   disconnect(): void {
     this._socket.close();
   }
-
+  setCanSendMessage(): void {
+    this._canSendMessages = true;
+  }
   setAsLeader(): void {
     this._isLeader = true;
   }
-  setPlayerJoinedRoom(roomId: string): void {
+  setJoinedRoomId(roomId: string): void {
     this._joinedRoomId = roomId;
   }
 }

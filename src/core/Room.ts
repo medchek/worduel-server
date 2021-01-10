@@ -1,8 +1,13 @@
+import {
+  defaultRoomSettings,
+  RoomSettings,
+  roundCountSettings,
+  timePerRoundSettings,
+} from "./../config/roomSettings";
 import { Player, PublicMember } from "./Player";
 
 export interface RoomOptions {
   maxSlots?: number;
-  roundCount?: number;
   gameId: number;
   id: string;
   requestedBy: Player;
@@ -18,20 +23,19 @@ export abstract class Room {
   protected _currentPlayerId: string;
   protected _createdBy: Player;
   protected _leaderId: string;
-  protected _maxSlots;
+  protected _maxSlots: number;
   protected _currentRound = 1;
-  protected _roundCount;
-  protected _timePerRound = 90;
   protected _isLobby = true;
-  protected _difficulty = 1;
+  protected _hasStarted = false;
   protected _members: Map<string, Player> = new Map();
+  // room default settings
+  protected settings = defaultRoomSettings; // timePerRound, difficulty, roundCount
 
   // private ;
   constructor(roomOptions: RoomOptions) {
-    const { maxSlots, id, roundCount, requestedBy: createdBy, gameId } = roomOptions;
+    const { maxSlots, id, requestedBy: createdBy, gameId } = roomOptions;
 
     this._maxSlots = maxSlots || 6;
-    this._roundCount = roundCount || 3;
     this._createdAt = Date.now();
     this._currentPlayerId = createdBy.id;
     this._id = id;
@@ -68,9 +72,33 @@ export abstract class Room {
     return this._members.size === 0;
   }
 
+  get memberCount(): number {
+    return this._members.size;
+  }
+
+  get roomSettings(): RoomSettings {
+    return this.settings;
+  }
+
+  get hasGameStarted(): boolean {
+    return this._hasStarted;
+  }
+
+  /**
+   * Used to decide whether to send the joined player the room settings or not. If the settings have not been changed, there is no need to send them to the client
+   * @return true if the room settings match the default values. False if they have been changed.
+   */
+  get isDefaultSettings(): boolean {
+    return (
+      this.roomSettings.roundCount === defaultRoomSettings.roundCount && // n of rounds
+      this.roomSettings.difficulty === defaultRoomSettings.difficulty && // difficulty
+      this.roomSettings.timePerRound === defaultRoomSettings.timePerRound // time per round
+    );
+  }
+
   public addMember(player: Player, joinedRoomId: string): void {
     // set the player as having joined a room so as to prevent any further room join or create
-    player.setPlayerJoinedRoom(joinedRoomId);
+    player.setJoinedRoomId(joinedRoomId);
     this._members.set(player.id, player);
   }
 
@@ -93,12 +121,52 @@ export abstract class Room {
     }
   }
 
-  public setNewRoomLeader(): void {
+  /**
+   * Sets the first avaible player as a new leader
+   * @return new leader Player object
+   */
+  public setNewRoomLeader(): Player {
     const iterator = this._members.values();
+    // skip the first player which should always be the leader
+    iterator.next();
     // get the first available member
     const newLeader: Player = iterator.next().value;
     // set it as the new leader
     newLeader.setAsLeader();
+    return newLeader;
+  }
+  /**
+   * set the room settings
+   * @param sid setting id
+   * @param id the id of the value
+   */
+  public setRoomSettings(
+    sid: number,
+    valueId: number
+  ): Promise<{ sid: number; value: number }> {
+    return new Promise((resolve, reject) => {
+      if (sid == 1) {
+        // the difficulty will be computed according to the id not the string value
+        // therfore, set it directly as the setting value
+        this.settings.difficulty = valueId;
+        // resolve
+        resolve({ sid, value: sid });
+      } else if (sid == 2) {
+        const roundCount = roundCountSettings.find((entry) => entry.id == valueId);
+        if (roundCount) {
+          this.settings.roundCount = roundCount.value;
+          // resolve
+          resolve({ sid, value: roundCount.value });
+        } else reject();
+      } else {
+        const timePerRound = timePerRoundSettings.find((entry) => entry.id == valueId);
+        if (timePerRound) {
+          this.settings.timePerRound = timePerRound.value;
+          // resolve
+          resolve({ sid, value: timePerRound.value });
+        } else reject();
+      }
+    });
   }
 
   /**

@@ -1,3 +1,4 @@
+import { EventListener } from "./EventListener";
 import { PlayerManager } from "./PlayerManager";
 import { RoomManager } from "./RoomManager";
 import { joinRoute } from "./../routes/joinRoute";
@@ -54,6 +55,10 @@ export class GameServer extends Kernel {
 
   private roomList: RoomManager = new RoomManager();
   private playerList: PlayerManager = new PlayerManager();
+  private eventListener: EventListener = new EventListener({
+    playerList: this.playerList,
+    roomList: this.roomList,
+  });
 
   constructor() {
     super();
@@ -113,7 +118,7 @@ export class GameServer extends Kernel {
       try {
         await this.wsGlobalRateLimit.consume(
           req.socket.remoteAddress as string, // this will be verified to never be undefined in the verifyClientHeaders, hence the type cast.
-          5
+          15 // consume 15 points per request, which equates to 4 attempts per minute
           // 1
         );
 
@@ -142,6 +147,7 @@ export class GameServer extends Kernel {
                   // DEVONLY timeout
                   setTimeout(() => {
                     console.log("createNewRoom() room created =>", room.id);
+                    player.setCanSendMessage();
                     this.eventDispatcher.roomCreated(player, room);
                   }, 1000);
                 })
@@ -182,11 +188,11 @@ export class GameServer extends Kernel {
             console.error(err);
           });
       } catch (rejRes) {
-        const remainingTime = Math.floor(rejRes.msBeforeNext / (1000 * 60));
+        const remainingTime = Math.ceil(rejRes.msBeforeNext / (1000 * 60));
         console.warn(
           "[handleSocketConnection] on.connection =>",
           `socket ip: "${req.socket.remoteAddress}" was blocked for too many connection attempts`,
-          `for a duration of ${remainingTime}} minute(s)`
+          `for a duration of ${remainingTime} minute(s)`
         );
 
         // `Too many connection attempts, you have been blocked for ${remainingTime} minutes`
@@ -209,14 +215,16 @@ export class GameServer extends Kernel {
    * @param req the request object that is needed to extract the ip
    */
   protected onMessage(player: Player, req: IncomingMessage): void {
+    // TODO rate limit
     const socket = player.socket;
 
-    socket.on("message", (messageData) => {
-      return new Promise((resolve, reject) => {
+    socket.on("message", async (messageData) => {
+      try {
+        await this.wsGlobalRateLimit.consume(player.ip, 1.2); // 50 messages per minute
+
         // first check if the player (client) is allowed to send messages
         if (!player.canSendMessages) {
           console.warn("player cannot yet send messages");
-          reject();
           return;
         }
         console.log("message received"); // checks if the message event is working
@@ -231,12 +239,27 @@ export class GameServer extends Kernel {
           // check if the message is valid json
           try {
             const clientEvent = JSON.parse(messageData);
+            console.log(clientEvent);
             // the data received should have a valid type by now,
             // furthre check the validity of data
-
-            socket.send(JSON.stringify(clientEvent));
-            resolve(clientEvent);
+            this.eventListener
+              .listen(player, clientEvent)
+              .then(() => {
+                // DEVONLY check message content
+                this.terminateSocket({
+                  socket,
+                  block: {
+                    ip: req.socket.remoteAddress as string,
+                    blockDurationSeconds: 60 * 5,
+                  },
+                });
+              })
+              .catch((err) => {
+                throw new Error(`Listen() catch : ${err}`);
+              });
+            // socket.send(JSON.stringify(clientEvent));
           } catch (err) {
+            // invalid JSON string
             this.terminateSocket({
               socket,
               block: {
@@ -244,11 +267,14 @@ export class GameServer extends Kernel {
                 blockDurationSeconds: 60 * 60,
               },
             });
-            reject();
-            console.error("onMessage() => invalid json", err);
+            console.error(
+              new Error("onMessage() => invalid json string"),
+              err,
+              messageData
+            );
           }
         } else {
-          console.log("message checking failed");
+          console.error(new Error("message checking failed"));
           // on check fail
           this.terminateSocket({
             socket,
@@ -257,9 +283,10 @@ export class GameServer extends Kernel {
               blockDurationSeconds: 60 * 60,
             },
           });
-          reject();
         }
-      });
+      } catch (err) {
+        // on limit reached
+      }
     });
   }
 
