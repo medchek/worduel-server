@@ -29,7 +29,7 @@ export abstract class Room {
   protected _hasStarted = false;
   protected _members: Map<string, Player> = new Map();
   // room default settings
-  protected settings = defaultRoomSettings; // timePerRound, difficulty, roundCount
+  protected settings = { ...defaultRoomSettings }; // timePerRound, difficulty, roundCount
 
   // private ;
   constructor(roomOptions: RoomOptions) {
@@ -90,9 +90,9 @@ export abstract class Room {
    */
   get isDefaultSettings(): boolean {
     return (
-      this.roomSettings.roundCount === defaultRoomSettings.roundCount && // n of rounds
-      this.roomSettings.difficulty === defaultRoomSettings.difficulty && // difficulty
-      this.roomSettings.timePerRound === defaultRoomSettings.timePerRound // time per round
+      this.settings.roundCount === defaultRoomSettings.roundCount && // n of rounds
+      this.settings.difficulty === defaultRoomSettings.difficulty && // difficulty
+      this.settings.timePerRound === defaultRoomSettings.timePerRound // time per round
     );
   }
 
