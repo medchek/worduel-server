@@ -16,7 +16,8 @@ import WebSocket from "ws";
 import { Player } from "./Player";
 // utils
 import colors from "colors";
-import { replaceWhiteSpaceOnce } from "./Utils";
+import { replaceWhiteSpaceOnce } from "./utils";
+import { colorConsole } from "tracer";
 // validation
 import { parse } from "qs";
 import contains from "validator/lib/contains";
@@ -29,7 +30,7 @@ import { Kernel } from "./Kernel";
 
 interface TerminateSocketOpts {
   socket: WebSocket;
-  message?: string;
+  reason?: string;
   block?: {
     ip: string | number;
     blockDurationSeconds: number;
@@ -246,13 +247,6 @@ export class GameServer extends Kernel {
               .listen(player, clientEvent)
               .then(() => {
                 // DEVONLY check message content
-                this.terminateSocket({
-                  socket,
-                  block: {
-                    ip: req.socket.remoteAddress as string,
-                    blockDurationSeconds: 60 * 5,
-                  },
-                });
               })
               .catch((err) => {
                 throw new Error(`Listen() catch : ${err}`);
@@ -321,28 +315,35 @@ export class GameServer extends Kernel {
    */
 
   private terminateSocket(options: TerminateSocketOpts): void {
-    const { socket, message, block } = options;
+    const { socket, reason: reason, block } = options;
     if (socket.readyState == 2 || socket.readyState == 3) return; // return if socket is not open
 
-    if (message) socket.send(JSON.stringify({ type: "error", message }));
+    const reasonLog = reason ? `Reason: ${reason}.` : "Reason: No reason provided";
+
+    // if (message) socket.send(JSON.stringify({ type: "error", message }));
+
     if (block) {
       const { ip, blockDurationSeconds } = block;
       // block the socket
       this.wsGlobalRateLimit
         .block(ip, blockDurationSeconds)
         .then(() => {
-          console.error(
-            `terminateSocket() => socket from ip: ${ip} has been terminated.`
+          colorConsole().warn(
+            `terminateSocket() => socket from ip: ${ip} has been terminated.`,
+            reasonLog
           );
         })
         .catch((err) => {
-          console.error("terminateSocket() => block error =>", err);
+          colorConsole().warn("terminateSocket() => rate limiter block error =>", err);
         });
       // then close it
       socket.close();
     } else {
       // if the no block is required, terminate the socket directly
-      console.error("terminateSocket() => socket terminated without blocking");
+      colorConsole().warn(
+        "terminateSocket() => socket terminated without blocking",
+        reasonLog
+      );
       socket.close();
     }
   }
