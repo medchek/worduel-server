@@ -119,8 +119,7 @@ export class GameServer extends Kernel {
       try {
         await this.wsGlobalRateLimit.consume(
           req.socket.remoteAddress as string, // this will be verified to never be undefined in the verifyClientHeaders, hence the type cast.
-          15 // consume 15 points per request, which equates to 4 attempts per minute
-          // 1
+          process.env.NODE_ENV !== "production" ? 0 : 15 // consume 15 points per request, which equates to 4 attempts per minute
         );
 
         this.verifyClientUrl(req)
@@ -240,13 +239,14 @@ export class GameServer extends Kernel {
           // check if the message is valid json
           try {
             const clientEvent = JSON.parse(messageData);
-            console.log(clientEvent);
+
             // the data received should have a valid type by now,
             // furthre check the validity of data
             this.eventListener
               .listen(player, clientEvent)
               .then(() => {
                 // DEVONLY check message content
+                colorConsole({ filters: [colors.green] }).log(clientEvent);
               })
               .catch((err) => {
                 throw new Error(`Listen() catch : ${err}`);
