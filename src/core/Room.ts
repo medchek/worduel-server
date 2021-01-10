@@ -150,7 +150,7 @@ export abstract class Room {
         // therfore, set it directly as the setting value
         this.settings.difficulty = valueId;
         // resolve
-        resolve({ sid, value: sid });
+        resolve({ sid, value: valueId });
       } else if (sid == 2) {
         const roundCount = roundCountSettings.find((entry) => entry.id == valueId);
         if (roundCount) {
