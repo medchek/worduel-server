@@ -6,7 +6,7 @@ interface ReplaceWhiteSpaceOnceOpt {
 }
 
 /**
- * Replace a the first encountered whitespace with a dahs (-) and remove all subsequent whitespaces.
+ * Replace the first encountered whitespace with a dahs (-) and remove all subsequent whitespaces.
  * @param str the string to process
  * @param options whether to trim and/or escape the string before processing
  * @returns a string with only the first whitespace replaced and all subsequent others removed
@@ -35,4 +35,16 @@ export function replaceWhiteSpaceOnce(
     }
   }
   return resultStr;
+}
+/**
+ * Generates a random number between min and max or between 0 and min if max is not provided
+ * @param min the minimun number possible
+ * @param max the maximum number possible
+ */
+export function randomNumber(min: number, max?: number): number {
+  if (!max) {
+    max = min;
+    min = 0;
+  }
+  return Math.floor(Math.random() * (max - min + 1) + min);
 }
