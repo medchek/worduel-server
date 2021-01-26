@@ -238,7 +238,7 @@ export class GameServer extends Kernel {
         ) {
           // check if the message is valid json
           try {
-            const clientEvent = JSON.parse(messageData);
+            const clientEvent = JSON.parse(messageData.trim());
 
             // the data received should have a valid type by now,
             // furthre check the validity of data
