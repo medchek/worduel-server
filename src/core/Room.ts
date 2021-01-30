@@ -392,10 +392,10 @@ export abstract class Room {
     if (this._timer) clearTimeout(this._timer);
     // nullify the timer
     this._timer = null;
-    // reset the state of players that have found the answer
-    this.resetRoundState();
     // execute the onROundEnd lifecycle after finishing the timer
     this.onRoundEnd();
+    // reset the state of players that have found the answer
+    this.resetRoundState();
     if (fn) fn();
   }
 
