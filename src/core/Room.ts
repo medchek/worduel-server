@@ -1,3 +1,4 @@
+import { EventDispatcher } from "./EventDispatcher";
 import {
   defaultRoomSettings,
   RoomSettings,
@@ -17,21 +18,39 @@ export interface PublicMembers {
 }
 
 export abstract class Room {
+  protected _dispatch = new EventDispatcher();
+
   protected _id: string;
   protected _gameId: number;
   protected _createdAt: number;
-  protected _currentPlayerId: string;
   protected _createdBy: Player;
   protected _leaderId: string;
   protected _maxSlots: number;
-  protected _currentRound = 1;
-  protected _isLobby = true;
-  protected _hasStarted = false;
   protected _members: Map<string, Player> = new Map();
   // room default settings
-  protected settings = { ...defaultRoomSettings }; // timePerRound, difficulty, roundCount
+  protected _settings = { ...defaultRoomSettings }; // timePerRound, difficulty, roundCount
+  // ** GAME STATE
+  protected _hasStarted = false;
+  protected _currentPlayerId: string;
+  protected _currentRound = 0;
+  protected _isLobby = true;
+  protected _wordToGuess: string | undefined;
 
-  // private ;
+  // timing
+  protected _timer: NodeJS.Timeout | null = null;
+  protected _timerStartedAt = 0;
+
+  /** time between annoucing a round and starting the timer (in seconds) */
+  protected _timeBeforeTimerStart = 4;
+  protected _currentWord = "";
+
+  /** The base score value that the first player who answers correctly should earn per round */
+  protected _baseScore = 50;
+  /** Amount to remove from the score calculation formula. The greater it is, the less points the player gets. Maxium is the number of players */
+  protected _scoreSubtractor = 0;
+  /**  the number of times a player finds the correct answer */
+  protected _correctAnswerCount = 0;
+
   constructor(roomOptions: RoomOptions) {
     const { maxSlots, id, requestedBy: createdBy, gameId } = roomOptions;
 
@@ -77,11 +96,45 @@ export abstract class Room {
   }
 
   get roomSettings(): RoomSettings {
-    return this.settings;
+    return this._settings;
   }
 
   get hasGameStarted(): boolean {
     return this._hasStarted;
+  }
+
+  get wordToGuess(): string | undefined {
+    return this._wordToGuess;
+  }
+
+  /** retuns true if all players have found the answer, false oherwise */
+  get hasAllAnswered(): boolean {
+    return this._correctAnswerCount == this.memberCount;
+  }
+
+  /** Get the data of the members of the room that are intented to be sent to the client */
+  get publicMembers(): PublicMembers {
+    const publicMembers: PublicMembers = {};
+    this.members.forEach((member, playerIdKey) => {
+      publicMembers[playerIdKey] = member.getAsPublicMember;
+    });
+    return publicMembers;
+  }
+
+  /** Return the time remaining before the timer ends */
+  get reminaingTimer(): number {
+    return (
+      this._settings.timePerRound - Math.floor((Date.now() - this._timerStartedAt) / 1000)
+    );
+  }
+
+  /** Return the score obtained by all the players during a round */
+  get playersRoundScore(): { [playerName: string]: number } {
+    const playersScore: { [playerName: string]: number } = {};
+    this._members.forEach((player) => {
+      playersScore[player.username] = player.roundScore;
+    });
+    return playersScore;
   }
 
   /**
@@ -90,9 +143,9 @@ export abstract class Room {
    */
   get isDefaultSettings(): boolean {
     return (
-      this.settings.roundCount === defaultRoomSettings.roundCount && // n of rounds
-      this.settings.difficulty === defaultRoomSettings.difficulty && // difficulty
-      this.settings.timePerRound === defaultRoomSettings.timePerRound // time per round
+      this._settings.roundCount === defaultRoomSettings.roundCount && // n of rounds
+      this._settings.difficulty === defaultRoomSettings.difficulty && // difficulty
+      this._settings.timePerRound === defaultRoomSettings.timePerRound // time per round
     );
   }
 
@@ -107,6 +160,19 @@ export abstract class Room {
   }
   public clearMembers(): void {
     this._members.clear();
+  }
+
+  /**
+   * Informs all the client in the room that the game has started.
+   *
+   */
+  protected setGameHasStarted(): void {
+    this._hasStarted = true;
+    this._isLobby = false;
+  }
+
+  protected setWordToGuess(word: string): void {
+    this._wordToGuess = word;
   }
 
   /**
@@ -148,20 +214,20 @@ export abstract class Room {
       if (sid == 1) {
         // the difficulty will be computed according to the id not the string value
         // therfore, set it directly as the setting value
-        this.settings.difficulty = valueId;
+        this._settings.difficulty = valueId;
         // resolve
         resolve({ sid, value: valueId });
       } else if (sid == 2) {
         const roundCount = roundCountSettings.find((entry) => entry.id == valueId);
         if (roundCount) {
-          this.settings.roundCount = roundCount.value;
+          this._settings.roundCount = roundCount.value;
           // resolve
           resolve({ sid, value: roundCount.value });
         } else reject();
       } else {
         const timePerRound = timePerRoundSettings.find((entry) => entry.id == valueId);
         if (timePerRound) {
-          this.settings.timePerRound = timePerRound.value;
+          this._settings.timePerRound = timePerRound.value;
           // resolve
           resolve({ sid, value: timePerRound.value });
         } else reject();
@@ -170,13 +236,230 @@ export abstract class Room {
   }
 
   /**
-   * Get the members of the room that are intented to be sent to the client
+   * SECTION GAME & ROUND MANAGEMENT
    */
-  public getPublicMembers(): PublicMembers {
-    const publicMembers: PublicMembers = {};
-    this.members.forEach((member, playerIdKey) => {
-      publicMembers[playerIdKey] = member.getAsPublicMember;
-    });
-    return publicMembers;
+
+  /**
+   * Start the game
+   */
+  public startGame(): void {
+    console.info(`Starting the game in room ${this.id}`);
+
+    // FIXME LATENCY EMULATOR
+    setTimeout(() => {
+      //-----------
+      // if the game has already started, dont do anything
+      if (this.hasGameStarted) {
+        console.warn(`Game in room ${this.id} has already started`);
+        return;
+      }
+      this.setGameHasStarted();
+      // allow players to send messages only if the game has just started
+      this.allowAnswers();
+      // inform all the client that the game started
+      this._dispatch.gameStarted(this);
+      // start the first round
+      this.nextRound();
+      //-----------
+    }, 1000);
+    //--------------
   }
+  /**
+   * Time to wait between announcing the round and kicking off the timer
+   */
+  private timeBeforeStartTimer(): Promise<void> {
+    return new Promise((resolve) => {
+      setTimeout(() => {
+        resolve();
+      }, this._timeBeforeTimerStart * 1000);
+    });
+  }
+
+  /**
+   * A timer to wait before executing subsequent code.
+   */
+  private wait(seconds: number): Promise<void> {
+    return new Promise((resolve) => {
+      setTimeout(() => {
+        resolve();
+      }, seconds * 1000);
+    });
+  }
+
+  /**
+   * Runs a complete round lifecycle
+   */
+  private async newRound(): Promise<void> {
+    // stops the timer if it's started
+    this.stopTimer();
+    // logic to run before announcing the round
+    const word = await this.onBeforeRoundStart();
+    // annonce the beginning of a new round
+    this._dispatch.announceNewRound(this, word);
+    // wait for the time before firing the timer
+    await this.timeBeforeStartTimer();
+
+    this.onRoundStart();
+    // start the timer
+    await this.startTimer();
+    return Promise.resolve();
+  }
+
+  /**
+   * Move to the next round. Ends the game if it was the last round when the method is called
+   */
+  protected nextRound(): void {
+    // if the timer is still going on stop it
+    if (this._currentRound < this._settings.roundCount) {
+      this._currentRound++;
+      this.newRound();
+    } else {
+      this.endGame();
+    }
+
+    //
+  }
+  private endGame(): void {
+    console.log(`Game in room ${this.id} ended!`);
+  }
+  /**
+   * Starts the round timer and announces it to all clients in the room.
+   * When the time runs out, stops the timer and fire onRoundEnd() lifecycle
+   */
+  protected startTimer(): Promise<void> {
+    return new Promise((resolve) => {
+      this._timerStartedAt = Date.now();
+      this._dispatch.timerStarted(this);
+      this._timer = setTimeout(() => {
+        // stop the timer and end the round after the time runs out
+        this.stopTimer();
+        resolve();
+      }, this._settings.timePerRound * 1000);
+    });
+  }
+
+  /** Calculates the score for the current player who has found the answer */
+  public calculatePlayerScore(player: Player): number {
+    //
+    const percentage =
+      (100 / this.memberCount) * (this.memberCount - this._scoreSubtractor);
+    this._scoreSubtractor++;
+    const score = Math.floor(this._baseScore * (percentage / 100));
+    player.addScore(score);
+    // add to the number of players that have found the correct answer per round
+    this._correctAnswerCount++;
+    return score;
+  }
+  /** Reset the round score for all the players in the room. Should be used at the end of the round. */
+  public resetRoundScores(): void {
+    this._members.forEach((player) => {
+      player.resetRoundScore();
+    });
+  }
+
+  /**
+   * Manually stop the timer and end the round.
+   * Intended to be used when all players have correctly answered before the round time runs out
+   */
+  public endRound(): void {
+    this.stopTimer();
+  }
+
+  /**
+   * Resets the state of the round.
+   * - Reset player has found correct answer state used to send messages for only players that have found the answer
+   * - Reset the score substractor used to calculate the sscore for each player who answers correctly
+   * - Reset the round scores of the player that are logged to inform the players the score they earned
+   * - Reset the correct answer counter needed to tell whether to stop the round if all players have answered before the time ends
+   *
+   */
+  private resetRoundState(): void {
+    this.resetAllPlayerHasAnswered();
+    this.resetScoreSubtractor();
+    this.resetRoundScores();
+    // reset the number of correct answer found in the round that is used to stop the round
+    // in case all the players have found correct answer
+    this._correctAnswerCount = 0;
+  }
+  /**
+   * Stops the timer. Reset all the round state as well
+   * @param fn optional function to execute after the timer is stopped
+   */
+  protected stopTimer(fn?: () => void): void {
+    if (!this._timer) return;
+    // reset the value of timerStartedAt
+    this._timerStartedAt = 0;
+    if (this._timer) clearTimeout(this._timer);
+    // nullify the timer
+    this._timer = null;
+    // reset the state of players that have found the answer
+    this.resetRoundState();
+    // execute the onROundEnd lifecycle after finishing the timer
+    this.onRoundEnd();
+    if (fn) fn();
+  }
+
+  /** Reset the "player has found the answer" state to false for all the players that have found the answer. */
+  protected resetAllPlayerHasAnswered(): void {
+    this._members.forEach((player) => {
+      if (player.hasAnswered) player.setHasAnswered(false);
+      else return;
+    });
+  }
+
+  /** Resets the score subtractor back to 0 */
+  private resetScoreSubtractor() {
+    this._scoreSubtractor = 0;
+  }
+
+  /** Allow players in this room to send messages/answers. Should be run at the begenning of the game*/
+  allowAnswers(): void {
+    this._members.forEach((player) => {
+      if (!player.canSendMessages) player.setCanSendMessage();
+    });
+  }
+
+  /** Disallow players in this room to send messages/answers. Should be run at the end of a game before disconnecting the players*/
+  disallowAnswers(): void {
+    this._members.forEach((player) => {
+      if (player.canSendMessages) player.setCanSendMessage(false);
+    });
+  }
+
+  /**
+   *
+   * ROUND LIFECYCLES
+   *
+   */
+
+  /**
+   * First round lifecycle to be fired when moving the new round
+   */
+  protected abstract onBeforeRoundStart(): Promise<string>;
+  /**
+   * Round Lifecycle fired after after timeBeforeStartTimer has resolved and at the beginning of the timer
+   * - Should contain game/round logic
+   */
+  protected abstract onRoundStart(): void;
+  /**
+   * Check the answer of the player
+   * @resolve Resolves to a number.
+   * - 0 = player input is acceptable but uncorrect.
+   * - 1 = player input is acceptable and is correct.
+   * - 2 = player has already find the answer and keeps sending more messages
+   * @reject The promise rejects when the user input in unacceptable/unexpected
+   */
+  public abstract checkAnswer(player: Player, answer: string): Promise<number>;
+  /**
+   * Last round lifecycle. Fired after the time has ran out or when the timer is manually stopped
+   */
+  private async onRoundEnd(): Promise<void> {
+    //
+    this._dispatch.announceRoundScores(this);
+    await this.wait(5);
+    this.nextRound();
+  }
+  /**
+   * Time to wait between announcing the round and starting the timer.
+   */
 }

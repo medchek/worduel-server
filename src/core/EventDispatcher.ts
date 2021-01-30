@@ -16,10 +16,26 @@ interface Message {
   sid?: number; // setting id
   sval?: number | string;
   newLeaderId?: string;
+  word?: string;
+  scores?: { [playerName: string]: number }; // score announcer data
+}
+
+export interface MessageOptions {
+  player: Player;
+  room: Room;
+  message?: string;
+  type: number; // the type of the message. 0 = regular. 1 = just found answer. 2 = already aswered
+}
+
+interface ChatMessage {
+  event: string;
+  from: string;
+  type: number; // the type of the message. 0 = regular. 1 = just found answer. 2 = already aswered
+  message?: string;
 }
 
 export class EventDispatcher {
-  private toJson(json: Message): string {
+  private toJsonStr(json: Message): string {
     return JSON.stringify(json);
   }
   /**
@@ -31,10 +47,18 @@ export class EventDispatcher {
   private toAllButOne(room: Room, playerId: string, data: Message) {
     room.members.forEach((player, id) => {
       if (id !== playerId) {
-        player.socket.send(this.toJson(data));
+        player.socket.send(this.toJsonStr(data));
       }
     });
   }
+  /**
+   * Send data to a specific player
+   * @param player
+   */
+  private toPlayer(player: Player, data: Message) {
+    player.socket.send(this.toJsonStr(data));
+  }
+
   /**
    * Send the event data to all the players in the given room
    * @param room the room object to send data to
@@ -42,9 +66,22 @@ export class EventDispatcher {
    */
   private toAll(room: Room, data: Message): void {
     room.members.forEach((player) => {
-      player.socket.send(this.toJson(data));
+      player.socket.send(this.toJsonStr(data));
     });
   }
+  /**
+   * Send the event data to all the players that have correctly answered
+   * @param room the room object to send data to
+   * @param data the data to be sent
+   */
+  private toAllHasAnswered(room: Room, data: Message): void {
+    room.members.forEach((player) => {
+      if (player.hasAnswered) {
+        player.socket.send(this.toJsonStr(data));
+      }
+    });
+  }
+
   // constructor(private player: Player, private room: Room) {}
   // # RoomCreated
   /**
@@ -54,7 +91,7 @@ export class EventDispatcher {
    */
   public roomCreated(player: Player, room: Room): void {
     player.socket.send(
-      this.toJson({
+      this.toJsonStr({
         event: "roomCreated",
         playerId: player.id,
         roomId: room.id,
@@ -72,19 +109,20 @@ export class EventDispatcher {
    */
   public roomJoined(player: Player, room: Room): void {
     // FIXME FIXED : client also needs to recive current room settings (selected game, difficulty, round count...etc)
+    // FIXME send remaining time, round n°, wordToGuess, scores, currentPlayer (when needed) if joining the game that is ongoing
     // which are yet to be implemented
     const data: Message = {
       event: "roomJoined",
       playerId: player.id,
       roomId: room.id,
       gameId: room.gameId,
-      party: room.getPublicMembers(),
+      party: room.publicMembers,
     };
     // TODO: only send settings that hhave changed from the default upon room join for optimisation
     if (!room.isDefaultSettings) {
       data.settings = room.roomSettings;
     }
-    player.socket.send(this.toJson(data));
+    player.socket.send(this.toJsonStr(data));
     // inform the other players that a new member joined
     this.playerHasJoined(room, player);
   }
@@ -140,5 +178,76 @@ export class EventDispatcher {
       ...data,
     };
     this.toAllButOne(room, player.id, sendData);
+  }
+
+  /**
+   * Event to inform all the clients in the room that the game has started
+   * @param room the room object
+   */
+  public gameStarted(room: Room): void {
+    this.toAll(room, { event: "start" });
+  }
+
+  /**
+   * Event to inform all the players than a new round is about to start
+   * @param room the game room object
+   * @param word the word that helps send to the client
+   */
+  public announceNewRound(room: Room, word: string): void {
+    this.toAll(room, {
+      event: "newRound",
+      word,
+    });
+  }
+
+  public announceRoundScores(room: Room): void {
+    //
+    const data = { event: "scores", scores: room.playersRoundScore };
+    this.toAll(room, data);
+  }
+
+  /**
+   * Event to inform the client that the timer has started
+   * @param room the game room object
+   */
+  public timerStarted(room: Room): void {
+    this.toAll(room, {
+      event: "timerStarted",
+    });
+  }
+
+  /**
+   * Forward a message to the client chat
+   * @param options The message options. The type option is espcially required to be able to send
+   * the message to either all the clients in the chat or only the ones who have already found the correct answer.
+   */
+  public sendChatMessage(options: MessageOptions): void {
+    const { player, room, type, message } = options;
+    if (!player.username) return;
+    const data: ChatMessage = {
+      event: "message",
+      type,
+      from: player.username,
+    };
+    // only send the message if necessary
+    if (message) data.message = message;
+    // if the type = has already answered
+    if (type === 2) {
+      // send only to the players that have already answered
+      this.toAllHasAnswered(room, data);
+    } else {
+      // send to all the players
+      this.toAll(room, data);
+    }
+  }
+  /**
+   * Event to inform the client to slow down from sending too many messages
+   * @param player the player object
+   */
+  public slowDown(player: Player): void {
+    if (!player.ip) return;
+    this.toPlayer(player, {
+      event: "slowDown",
+    });
   }
 }
