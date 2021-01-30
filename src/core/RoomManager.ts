@@ -158,6 +158,7 @@ export class RoomManager extends Kernel {
         });
         targetRoom.clearMembers();
       }
+      console.log(`room "${targetRoom.id}" deleted`);
     }
     // remove the room
     return this.roomList.delete(roomId);
@@ -172,9 +173,9 @@ export class RoomManager extends Kernel {
       let newLeaderId: string | null = null;
       const room = this.getRoom(player.joinedRoomId);
       if (room) {
-        // console.log("beforeRomve=>", room.getPublicMembers());
-        // remove room if it's empty
-        if (room.isEmpty) {
+        // room is not empty at this point since the disconnected player has not been removed from the member list yet
+        // there fore check there is only one player in the room at the moment the player disconnects and remove the room if so
+        if (room.memberCount == 1) {
           this.removeRoom(player.joinedRoomId);
         } else {
           // otherwise, remove only the player that left from the room members
@@ -191,7 +192,6 @@ export class RoomManager extends Kernel {
         // delete the player from the playerList as well
         this.playerList.removePlayer({ id: player.id, terminateSocket: true });
         this.eventDispatcher.playerHasDisconnected(room, player, newLeaderId);
-        // console.log("finally=>", room!.getPublicMembers());
       }
     }
   }
