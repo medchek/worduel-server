@@ -30,7 +30,13 @@ export abstract class Room {
   // room default settings
   protected _settings = { ...defaultRoomSettings }; // timePerRound, difficulty, roundCount
   // ** GAME STATE
+  /** round phases. Used to inform the client which game component to load when joining an ongoing game
+   * - 1 = new round / before timer start.
+   * - 2 = timer started / round ongoing.
+   * - 3 = timer stopped / round ended/ score announcing */
+  protected _roundPhase = 1;
   protected _hasStarted = false;
+  protected _gameEnded = false;
   protected _currentPlayerId: string;
   protected _currentRound = 0;
   protected _isLobby = true;
@@ -132,7 +138,7 @@ export abstract class Room {
   get playersRoundScore(): { [playerName: string]: number } {
     const playersScore: { [playerName: string]: number } = {};
     this._members.forEach((player) => {
-      playersScore[player.username] = player.roundScore;
+      playersScore[player.id] = player.roundScore;
     });
     return playersScore;
   }
@@ -290,6 +296,9 @@ export abstract class Room {
    * Runs a complete round lifecycle
    */
   private async newRound(): Promise<void> {
+    if (this._gameEnded) return;
+    // set the first phase of the round
+    this._roundPhase = 1;
     // stops the timer if it's started
     this.stopTimer();
     // logic to run before announcing the round
@@ -298,7 +307,6 @@ export abstract class Room {
     this._dispatch.announceNewRound(this, word);
     // wait for the time before firing the timer
     await this.timeBeforeStartTimer();
-
     this.onRoundStart();
     // start the timer
     await this.startTimer();
@@ -309,6 +317,10 @@ export abstract class Room {
    * Move to the next round. Ends the game if it was the last round when the method is called
    */
   protected nextRound(): void {
+    // if the game ended, dont go any further
+    if (this._gameEnded) return;
+
+    console.log(`starting new round in room ${this.id}`);
     // if the timer is still going on stop it
     if (this._currentRound < this._settings.roundCount) {
       this._currentRound++;
@@ -319,7 +331,14 @@ export abstract class Room {
 
     //
   }
-  private endGame(): void {
+  public endGame(): void {
+    // if the game is not finished yet
+    if (this._gameEnded) return console.warn("CANNOT END GAME. GAME ALREADY FINISHED");
+    this._gameEnded = true;
+    // stop the timer if not already stopped, and ask the stopTimer method not go to the next round
+    if (this._timer !== null) this.stopTimer(true);
+    // inform the players that the game has ended
+    this._dispatch.gameEnded(this);
     console.log(`Game in room ${this.id} ended!`);
   }
   /**
@@ -328,6 +347,8 @@ export abstract class Room {
    */
   protected startTimer(): Promise<void> {
     return new Promise((resolve) => {
+      // set the "round ongoibn"
+      this._roundPhase = 2;
       this._timerStartedAt = Date.now();
       this._dispatch.timerStarted(this);
       this._timer = setTimeout(() => {
@@ -383,9 +404,9 @@ export abstract class Room {
   }
   /**
    * Stops the timer. Reset all the round state as well
-   * @param fn optional function to execute after the timer is stopped
+   * @param endGame prevent going to the next when stopping the timer
    */
-  protected stopTimer(fn?: () => void): void {
+  protected stopTimer(endGame = false): void {
     if (!this._timer) return;
     // reset the value of timerStartedAt
     this._timerStartedAt = 0;
@@ -393,10 +414,9 @@ export abstract class Room {
     // nullify the timer
     this._timer = null;
     // execute the onROundEnd lifecycle after finishing the timer
-    this.onRoundEnd();
+    if (!endGame) this.onRoundEnd();
     // reset the state of players that have found the answer
     this.resetRoundState();
-    if (fn) fn();
   }
 
   /** Reset the "player has found the answer" state to false for all the players that have found the answer. */
@@ -455,6 +475,7 @@ export abstract class Room {
    */
   private async onRoundEnd(): Promise<void> {
     //
+    this._roundPhase = 3;
     this._dispatch.announceRoundScores(this);
     await this.wait(5);
     this.nextRound();
