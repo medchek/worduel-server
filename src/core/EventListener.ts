@@ -214,6 +214,8 @@ export class EventListener extends Kernel {
 
               // if the player gets the correct answer
               if (reason == 1) {
+                // add the player id into the message data so as to stop the timer and reveal the check mark in the client side
+                message.playerId = player.id;
                 // mark the player as having correctly answered during the current round
                 player.setHasAnswered();
                 room.calculatePlayerScore(player);

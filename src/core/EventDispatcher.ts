@@ -21,6 +21,7 @@ interface Message {
 }
 
 export interface MessageOptions {
+  playerId?: string; // the player id who got the answer correctly
   player: Player;
   room: Room;
   message?: string;
@@ -32,6 +33,7 @@ interface ChatMessage {
   from: string;
   type: number; // the type of the message. 0 = regular. 1 = just found answer. 2 = already aswered
   message?: string;
+  playerId?: string;
 }
 
 export class EventDispatcher {
@@ -160,7 +162,8 @@ export class EventDispatcher {
     if (newLaederId) {
       data.newLeaderId = newLaederId;
     }
-    this.toAllButOne(room, player.id, data);
+    // this.toAllButOne(room, player.id, data);
+    this.toAll(room, data);
   }
   /**
    * Event to inform all the clients in the room except the leader, that settings have been updated.
@@ -202,7 +205,7 @@ export class EventDispatcher {
 
   public announceRoundScores(room: Room): void {
     //
-    const data = { event: "scores", scores: room.playersRoundScore };
+    const data = { event: "score", scores: room.playersRoundScore };
     this.toAll(room, data);
   }
 
@@ -222,13 +225,21 @@ export class EventDispatcher {
    * the message to either all the clients in the chat or only the ones who have already found the correct answer.
    */
   public sendChatMessage(options: MessageOptions): void {
-    const { player, room, type, message } = options;
+    const { player, room, type, message, playerId } = options;
     if (!player.username) return;
     const data: ChatMessage = {
       event: "message",
       type,
       from: player.username,
     };
+    // if the player has found the correct answer, include the player id within the dispatched data.
+    // The player id is used to uniquely identify the player who answered correctly, and react to it accordingly in the client side
+    // this is used instead of sending yet another message to the player who answered correctly.
+
+    if (type === 1) {
+      data.playerId = playerId;
+    }
+
     // only send the message if necessary
     if (message) data.message = message;
     // if the type = has already answered
@@ -248,6 +259,16 @@ export class EventDispatcher {
     if (!player.ip) return;
     this.toPlayer(player, {
       event: "slowDown",
+    });
+  }
+
+  /**
+   * Event to inform all the clients in the room that the game has ended
+   * @param room the game room object
+   */
+  gameEnded(room: Room): void {
+    this.toAll(room, {
+      event: "gameEnded",
     });
   }
 }
