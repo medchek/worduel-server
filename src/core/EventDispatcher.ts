@@ -20,6 +20,20 @@ interface Message {
   scores?: { [playerName: string]: number }; // score announcer data
 }
 
+interface JoiedMessage {
+  event: "roomJoined";
+  playerId: string;
+  roomId: string;
+  gameId: number;
+  party: PublicMembers;
+  settings?: RoomSettings;
+  word?: string;
+  roundPhase?: number;
+  remainingTime?: number;
+  round?: number;
+  scores?: { [playerName: string]: number };
+}
+
 export interface MessageOptions {
   playerId?: string; // the player id who got the answer correctly
   player: Player;
@@ -113,7 +127,7 @@ export class EventDispatcher {
     // FIXME FIXED : client also needs to recive current room settings (selected game, difficulty, round count...etc)
     // FIXME send remaining time, round n°, wordToGuess, scores, currentPlayer (when needed) if joining the game that is ongoing
     // which are yet to be implemented
-    const data: Message = {
+    const data: JoiedMessage = {
       event: "roomJoined",
       playerId: player.id,
       roomId: room.id,
@@ -124,6 +138,20 @@ export class EventDispatcher {
     if (!room.isDefaultSettings) {
       data.settings = room.roomSettings;
     }
+    // # if the game has started, include more data
+    if (room.hasGameStarted) {
+      //
+      data.roundPhase = room.roundPhase;
+      data.word = room.hintWord;
+      data.round = room.currentRound;
+      if (room.roundPhase == 2) {
+        data.remainingTime = room.reminaingTime;
+      }
+      if (room.roundPhase == 3) {
+        data.scores = room.playersRoundScore;
+      }
+    }
+
     player.socket.send(this.toJsonStr(data));
     // inform the other players that a new member joined
     this.playerHasJoined(room, player);

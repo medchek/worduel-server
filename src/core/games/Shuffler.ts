@@ -5,7 +5,7 @@ import arrayShuffle from "array-shuffle";
 
 //
 export class Shuffler extends Room {
-  private shuffledWord: string | undefined;
+  private _shuffledWord: string | undefined;
 
   constructor(options: RoomOptions) {
     super(options);
@@ -15,12 +15,14 @@ export class Shuffler extends Room {
     return new Promise((resolve) => {
       // get a random word based on the difficulty id
       const wordToGuess = getRandomWord(this._settings.difficulty);
+      console.log("Generated word =>", wordToGuess);
       // set it a the word to be guessed
       this.setWordToGuess(wordToGuess);
       // shuffle the word
-      this.shuffledWord = this.shuffleWord(wordToGuess);
+      this._shuffledWord = this.shuffleWord(wordToGuess);
+      this.setHintWord(this._shuffledWord);
       // must resolve to be able to move to the next lifecycle
-      resolve(this.shuffledWord);
+      resolve(this._shuffledWord);
     });
   }
   protected onRoundStart(): void {

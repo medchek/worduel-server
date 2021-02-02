@@ -41,6 +41,8 @@ export abstract class Room {
   protected _currentRound = 0;
   protected _isLobby = true;
   protected _wordToGuess: string | undefined;
+  /** Word used to help the player guess the wordToGuess */
+  protected _hintWord: string | undefined;
 
   // timing
   protected _timer: NodeJS.Timeout | null = null;
@@ -54,7 +56,7 @@ export abstract class Room {
   protected _baseScore = 50;
   /** Amount to remove from the score calculation formula. The greater it is, the less points the player gets. Maxium is the number of players */
   protected _scoreSubtractor = 0;
-  /**  the number of times a player finds the correct answer */
+  /**  the number of player who found the correct answer during a round. Used to end the round if all player have found the current answer before the timer runs out */
   protected _correctAnswerCount = 0;
 
   constructor(roomOptions: RoomOptions) {
@@ -113,6 +115,22 @@ export abstract class Room {
     return this._wordToGuess;
   }
 
+  get currentRound(): number {
+    return this._currentRound;
+  }
+
+  get hintWord(): string | undefined {
+    return this._hintWord;
+  }
+
+  /** round phases. Used to inform the client which game component to load when joining an ongoing game
+   * - 1 = new round / before timer start.
+   * - 2 = timer started / round ongoing.
+   * - 3 = timer stopped / round ended/ score announcing */
+  get roundPhase(): number {
+    return this._roundPhase;
+  }
+
   /** retuns true if all players have found the answer, false oherwise */
   get hasAllAnswered(): boolean {
     return this._correctAnswerCount == this.memberCount;
@@ -128,7 +146,7 @@ export abstract class Room {
   }
 
   /** Return the time remaining before the timer ends */
-  get reminaingTimer(): number {
+  get reminaingTime(): number {
     return (
       this._settings.timePerRound - Math.floor((Date.now() - this._timerStartedAt) / 1000)
     );
@@ -179,6 +197,10 @@ export abstract class Room {
 
   protected setWordToGuess(word: string): void {
     this._wordToGuess = word;
+  }
+
+  protected setHintWord(word: string): void {
+    this._hintWord = word;
   }
 
   /**
@@ -297,8 +319,10 @@ export abstract class Room {
    */
   private async newRound(): Promise<void> {
     if (this._gameEnded) return;
-    // set the first phase of the round
-    this._roundPhase = 1;
+    // reset the state of players that have found the answer
+    this.resetRoundState();
+    // // set the first phase of the round
+    // // this._roundPhase = 1;
     // stops the timer if it's started
     this.stopTimer();
     // logic to run before announcing the round
@@ -392,6 +416,7 @@ export abstract class Room {
    * - Reset the score substractor used to calculate the sscore for each player who answers correctly
    * - Reset the round scores of the player that are logged to inform the players the score they earned
    * - Reset the correct answer counter needed to tell whether to stop the round if all players have answered before the time ends
+   * - Rest the round phase back to the first one (default one)
    *
    */
   private resetRoundState(): void {
@@ -401,6 +426,8 @@ export abstract class Room {
     // reset the number of correct answer found in the round that is used to stop the round
     // in case all the players have found correct answer
     this._correctAnswerCount = 0;
+    // reset round phase back to its default
+    this._roundPhase = 1;
   }
   /**
    * Stops the timer. Reset all the round state as well
@@ -416,7 +443,7 @@ export abstract class Room {
     // execute the onROundEnd lifecycle after finishing the timer
     if (!endGame) this.onRoundEnd();
     // reset the state of players that have found the answer
-    this.resetRoundState();
+    // this.resetRoundState();
   }
 
   /** Reset the "player has found the answer" state to false for all the players that have found the answer. */
