@@ -149,6 +149,7 @@ export class RoomManager extends Kernel {
    * @param roomId id of the room to be removed
    */
   private removeRoom(roomId: string): boolean {
+    let removed = false;
     const targetRoom = this.getRoom(roomId);
     // disconenct and remove all players if there are any
     if (targetRoom) {
@@ -158,10 +159,12 @@ export class RoomManager extends Kernel {
         });
         targetRoom.clearMembers();
       }
-      console.log(`room "${targetRoom.id}" deleted`);
+      if (targetRoom.hasGameStarted) targetRoom.endGame();
+      // remove the room
+      removed = this.roomList.delete(roomId);
+      console.log(`room "${targetRoom.id}" deleted = ${removed}`);
     }
-    // remove the room
-    return this.roomList.delete(roomId);
+    return removed;
   }
 
   /**
