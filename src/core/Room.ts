@@ -480,7 +480,7 @@ export abstract class Room {
    */
 
   /**
-   * First round lifecycle to be fired when moving the new round
+   * First round lifecycle to be fired when moving to a new round
    */
   protected abstract onBeforeRoundStart(): Promise<string>;
   /**
