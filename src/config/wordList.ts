@@ -31,9 +31,15 @@ export const wordList = [
     "message",
     "member",
     "letter",
-    "level",
     "building",
     "bank",
+    "abort",
+    "above",
+    "affix",
+    "agree",
+    "ahead",
+    "airplane",
+    "cover",
   ],
   // medium
   [
@@ -66,9 +72,20 @@ export const wordList = [
     "irrelevant",
     "investment",
     "commitment",
+    "academically",
+    "abyssal",
+    "acceleration",
+    "abdomen",
+    "ability",
+    "aggressive",
+    "alcohol",
+    "ambiance",
+    "coworker",
   ],
   // hard
   [
+    "alphabetical",
+    "affiliation",
     "investment",
     "government",
     "development",
@@ -94,6 +111,7 @@ export const wordList = [
     "hypothetical",
     "hypnotize",
     "multidimensional",
+    "craftsmanship",
   ],
 ];
 
