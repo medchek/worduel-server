@@ -9,9 +9,9 @@
   "scripts": {
     "dev": "npx ts-node-dev --inspect -- ./src/index.ts",
     "dev-light": "npx ts-node-dev --respawn ./src/index.ts",
-    "build": "webpack",
-    "ts-build": "npx tsc",
-    "lint": "npx eslint . --ext .js,.ts,"
+    "build": "npx tsc",
+    "lint": "npx eslint . --ext .js,.ts,",
+    "start": "node ./build/index.js"
   },
   "author": "roleqx",
   "license": "ISC",
