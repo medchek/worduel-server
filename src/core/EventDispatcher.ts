@@ -38,7 +38,7 @@ export interface MessageOptions {
   playerId?: string; // the player id who got the answer correctly
   player: Player;
   room: Room;
-  message?: string;
+  message: string;
   type: number; // the type of the message. 0 = regular. 1 = just found answer. 2 = already aswered
 }
 
@@ -249,34 +249,39 @@ export class EventDispatcher {
 
   /**
    * Forward a message to the client chat
-   * @param options The message options. The type option is espcially required to be able to send
+   * @param options The message options. The message type option is espcially required in order to send
    * the message to either all the clients in the chat or only the ones who have already found the correct answer.
    */
   public sendChatMessage(options: MessageOptions): void {
-    const { player, room, type, message, playerId } = options;
+    const { player, room, type, message } = options;
     if (!player.username) return;
     const data: ChatMessage = {
       event: "message",
       type,
       from: player.username,
     };
-    // if the player has found the correct answer, include the player id within the dispatched data.
-    // The player id is used to uniquely identify the player who answered correctly, and react to it accordingly in the client side
-    // this is used instead of sending yet another message to the player who answered correctly.
-
+    // if the player has found the answer, send two separate events
+    // one: to infrom all the players but the one who answered that x player has answered correctly
+    // two: to infrom the player who just answered correctly of his successful answer
     if (type === 1) {
-      data.playerId = playerId;
-    }
-
-    // only send the message if necessary
-    if (message) data.message = message;
-    // if the type = has already answered
-    if (type === 2) {
-      // send only to the players that have already answered
-      this.toAllHasAnswered(room, data);
+      // send a message informing the players who haven't gotten the answer yet that playerId has found the correct answer, excluding the answer (message)
+      // the playerId is included to target the player within the party object and change the client state accordingly
+      this.toAllButOne(room, player.id, { ...data, playerId: player.id });
+      // send the player who got the answer correctly the message along with the correct answer
+      this.toPlayer(player, { event: "correct", message });
     } else {
-      // send to all the players
-      this.toAll(room, data);
+      // in other cases, include the message in the answer
+      data.message = message;
+      // if the type = has already answered
+      if (type === 2) {
+        // send only to the players that have already answered
+        this.toAllHasAnswered(room, data);
+      }
+      // if it's a regular message
+      if (type === 0) {
+        // send to all the players
+        this.toAll(room, data);
+      }
     }
   }
   /**

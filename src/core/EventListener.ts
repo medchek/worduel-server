@@ -207,15 +207,14 @@ export class EventListener extends Kernel {
                 type: reason,
                 player,
                 room,
+                message: answer,
               };
-              // if the player has found the correct answer, dont forward it to the client chat so as to let others continue guessing it.
-              // only forward the message if the type is not 1
-              if (reason != 1) message.message = answer;
+              // // if the player has found the correct answer, dont forward it to the client chat so as to let others continue guessing it.
+              // // only forward the message if the type is not 1
+              // if (reason != 1) message.message = answer;
 
               // if the player gets the correct answer
               if (reason == 1) {
-                // add the player id into the message data so as to stop the timer and reveal the check mark in the client side
-                message.playerId = player.id;
                 // mark the player as having correctly answered during the current round
                 player.setHasAnswered();
                 room.calculatePlayerScore(player);
