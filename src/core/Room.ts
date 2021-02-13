@@ -32,12 +32,18 @@ export abstract class Room {
   // ** GAME STATE
   /** round phases. Used to inform the client which game component to load when joining an ongoing game
    * - 1 = new round / before timer start.
+   * - 1.1 = turn announcer (if game allows it)
+   * - 1.2 = player word selection window (if game allows it)
    * - 2 = timer started / round ongoing.
    * - 3 = timer stopped / round ended/ score announcing */
   protected _roundPhase = 1;
+  /** Whether the game features a turn system where each player gets to play once per round */
+  protected abstract _hasTurns: boolean;
+  /** When hasTurn is true this, can be set to allow players to select a word among three when their turn comes  */
+  // protected abstract _hasToSelectWord: boolean;
   protected _hasStarted = false;
   protected _gameEnded = false;
-  protected _currentPlayerId: string;
+  protected _currentPlayerIndex: number | null = null;
   protected _currentRound = 0;
   protected _isLobby = true;
   protected _wordToGuess: string | undefined;
@@ -64,7 +70,7 @@ export abstract class Room {
 
     this._maxSlots = maxSlots || 6;
     this._createdAt = Date.now();
-    this._currentPlayerId = createdBy.id;
+    // this._currentPlayerId = createdBy.id;
     this._id = id;
     this._gameId = gameId;
     this._leaderId = createdBy.id;
@@ -125,6 +131,8 @@ export abstract class Room {
 
   /** round phases. Used to inform the client which game component to load when joining an ongoing game
    * - 1 = new round / before timer start.
+   * - 1.1 = turn announcer (if game allows it)
+   * - 1.2 = player word selection window (if game allows it)
    * - 2 = timer started / round ongoing.
    * - 3 = timer stopped / round ended/ score announcing */
   get roundPhase(): number {
@@ -263,6 +271,22 @@ export abstract class Room {
     });
   }
 
+  /** Sets the next player to play and return the id of said player */
+  protected setNextPlayer(): string {
+    if (!this._hasTurns) throw new Error("This game does not feature a turn system");
+    const members = Array.from(this._members);
+    if (!this._currentPlayerIndex) {
+      this._currentPlayerIndex = 0;
+      // return the first player, with the item at 0 index being the playerId
+      return members[0][0];
+    } else {
+      // otherwise, move to the next player
+      this._currentPlayerIndex++;
+      // and return his id
+      return members[this._currentPlayerIndex][0];
+    }
+  }
+
   /**
    * SECTION GAME & ROUND MANAGEMENT
    */
@@ -336,6 +360,10 @@ export abstract class Room {
     await this.startTimer();
     return Promise.resolve();
   }
+  /** Runs a complete round lifecycle including turns for each player */
+  private async newTurnCycle(): Promise<void> {
+    // to be implemented later
+  }
 
   /**
    * Move to the next round. Ends the game if it was the last round when the method is called
@@ -354,6 +382,11 @@ export abstract class Room {
     }
 
     //
+  }
+  /** To be imlemented later */
+  private nextTurn(): void {
+    if (this._gameEnded) return;
+    console.log(`going to next turn in room ${this.id}`);
   }
   public endGame(): void {
     // if the game is not finished yet

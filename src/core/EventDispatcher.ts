@@ -231,6 +231,30 @@ export class EventDispatcher {
     });
   }
 
+  /**
+   * Event to inform all the players in the room of a new player's turn
+   * @param room the game room object
+   * @param playerId the id of the player that is to play currently
+   */
+  public annouceTurn(room: Room, playerId: string): void {
+    this.toAll(room, {
+      event: "newTurn",
+      playerId: playerId,
+    });
+  }
+
+  public announcePlayerIsSelectingWord(room: Room, playerId: string): void {
+    this.toAllButOne(room, playerId, {
+      event: "selectingWord",
+      playerId,
+    });
+  }
+  // wordSelection: { id: number; word: string }[]
+
+  /**
+   * Event to inform all the clinets in the room of the scores obtained by all the players during a single round
+   * @param room the game room object
+   */
   public announceRoundScores(room: Room): void {
     //
     const data = { event: "score", scores: room.playersRoundScore };

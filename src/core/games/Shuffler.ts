@@ -6,6 +6,7 @@ import arrayShuffle from "array-shuffle";
 //
 export class Shuffler extends Room {
   private _shuffledWord: string | undefined;
+  _hasTurns = false;
 
   constructor(options: RoomOptions) {
     super(options);
