@@ -227,7 +227,7 @@ export class GameServer extends Kernel {
           console.warn("player cannot yet send messages");
           return;
         }
-        console.log("message received"); // checks if the message event is working
+        colorConsole().log(`Message received by ${player.username}:${player.id}`); // checks if the message event is working
         // any suspecious data content should terminate the socket connection
 
         // if the message is of type string and its length does not exceed 255
@@ -351,29 +351,37 @@ export class GameServer extends Kernel {
    * This will handle the client request to upgrade to a websocket connection.
    * It will check for the necessary headers and allow or interrupt the connection accordingly
    */
-  private handleServerUpgrade(): void {
-    this.server.on("upgrade", (req: IncomingMessage, socket: Socket) => {
-      // this.ws.shouldHandle(req)
-      if (this.verifyClientHeaders(req)) {
-        console.log("WS UPGRADE ACCEPTED AT HANDSHAKE");
-      } else {
-        socket.destroy();
-        console.log("WS UPGRADE REFUSED");
-      }
+  private handleServerUpgrade(): Promise<void> {
+    return new Promise((resolve, reject) => {
+      this.server.on("upgrade", (req: IncomingMessage, socket: Socket) => {
+        if (this.verifyClientHeaders(req)) {
+          colorConsole({ filters: [colors.green] }).log(
+            "WS UPGRADE ACCEPTED AT HANDSHAKE"
+          );
+          resolve();
+        } else {
+          socket.destroy();
+          colorConsole({ filters: [colors.red] }).log("WS UPGRADE REFUSED");
+          throw reject();
+        }
+      });
     });
   }
 
   // should be fired before allowing the connection
   private verifyClientHeaders(req: IncomingMessage): boolean {
+    if (!process.env.CLIENT_ORIGIN) throw new Error("CLIENT_ORIGIN env not set!");
     const allowedOrigins = [
-      "chrome-extension://cbcbkhdmedgianpaifchdaddpnmgnknn", // temp for dev
+      // "chrome-extension://cbcbkhdmedgianpaifchdaddpnmgnknn", // temp for dev
       "http://localhost:8080",
+      process.env.CLIENT_ORIGIN + process.env.CLIENT_PORT
+        ? `:${process.env.CLIENT_PORT}`
+        : "",
     ];
 
     // if the requesting socket has no ip adress, then block the connection
     if (
-      !req.socket.remoteAddress ||
-      req.headers["x-forwarded-for"] ||
+      (!req.socket.remoteAddress && !req.headers["x-forwarded-for"]) ||
       !req.headers.origin ||
       !allowedOrigins.includes(req.headers.origin)
     ) {
@@ -485,7 +493,11 @@ export class GameServer extends Kernel {
         "\n",
         colors.green(`http(s):      http://localhost:${process.env.PORT}`),
         "\n",
-        colors.green(`websocket:    ws://localhost:${process.env.PORT}`)
+        colors.green(`websocket:    ws://localhost:${process.env.PORT}`),
+        "\n",
+        `expecting requests from origin: ${process.env.CLIENT_ORIGIN}${
+          process.env.CLIENT_PORT ? ":" + process.env.CLIENT_PORT : ""
+        }`
       );
     });
   }
