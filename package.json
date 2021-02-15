@@ -3,6 +3,7 @@
   "private": true,
   "version": "0.1.1",
   "description": "worduel server",
+  "license": "CC BY-NC-SA 4.0",
   "engines": {
     "node": "14.15.3"
   },
@@ -14,7 +15,6 @@
     "start": "node ./build/index.js"
   },
   "author": "roleqx",
-  "license": "CC BY-NC-SA",
   "devDependencies": {
     "@types/compression": "^1.7.0",
     "@types/cors": "^2.8.9",

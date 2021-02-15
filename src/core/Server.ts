@@ -64,12 +64,18 @@ export class GameServer extends Kernel {
   constructor() {
     super();
     this.app = express();
+    if (!process.env.CLIENT_ORIGIN) throw new Error("CLIENT ORIGIN UNDEFINED IN ENV");
+    const allowedOrigin =
+      process.env.CLIENT_ORIGIN + process.env.CLIENT_PORT
+        ? `:${process.env.CLIENT_PORT}`
+        : "";
+
     // middlewares
     // server.set("trust proxy", 1) // enable for reverse proxy (ngnix, heroku)
     this.app.use(
       cors({
-        allowedHeaders: ["http://localhost:8080"],
-        methods: ["POST", "GET"],
+        allowedHeaders: [allowedOrigin],
+        methods: ["GET"],
       })
     );
     this.app.use(helmet());
@@ -119,7 +125,7 @@ export class GameServer extends Kernel {
       try {
         await this.wsGlobalRateLimit.consume(
           req.socket.remoteAddress as string, // this will be verified to never be undefined in the verifyClientHeaders, hence the type cast.
-          process.env.NODE_ENV !== "production" ? 0 : 15 // consume 15 points per request, which equates to 4 attempts per minute
+          15 // consume 15 points per request, which equates to 4 attempts per minute
         );
 
         this.verifyClientUrl(req)
@@ -145,18 +151,17 @@ export class GameServer extends Kernel {
                 .then((room) => {
                   // # when the room is successfully created
                   // DEVONLY timeout
-                  setTimeout(() => {
-                    console.log("createNewRoom() room created =>", room.id);
-                    player.setCanSendMessage();
-                    this.eventDispatcher.roomCreated(player, room);
-                  }, 1000);
+                  // setTimeout(() => {
+                  console.log("createNewRoom() room created =>", room.id);
+                  player.setCanSendMessage();
+                  this.eventDispatcher.roomCreated(player, room);
+                  // }, 1000);
                 })
                 .catch((err) => {
                   console.error("createNewRoom() error => ", err);
                 });
             } else {
               // * Join romm request
-              console.log("joining");
               this.roomList
                 .joinRoom({
                   roomId: typeof id !== "string" ? id.toString() : id,
@@ -164,13 +169,13 @@ export class GameServer extends Kernel {
                 })
                 .then((room) => {
                   // DEVONLY timeout
-                  setTimeout(() => {
-                    console.log("joinedRoom() room joined!");
-                    this.eventDispatcher.roomJoined(player, room);
-                  }, 2000);
+                  // setTimeout(() => {
+                  console.log("joinedRoom() room joined!");
+                  this.eventDispatcher.roomJoined(player, room);
+                  // }, 2000);
                 })
                 .catch((err) => {
-                  console.log("joinRoom() error =>", err);
+                  console.error("joinRoom() error =>", err);
                 });
             }
 
@@ -373,7 +378,6 @@ export class GameServer extends Kernel {
     if (!process.env.CLIENT_ORIGIN) throw new Error("CLIENT_ORIGIN env not set!");
     const allowedOrigins = [
       // "chrome-extension://cbcbkhdmedgianpaifchdaddpnmgnknn", // temp for dev
-      "http://localhost:8080",
       process.env.CLIENT_ORIGIN + process.env.CLIENT_PORT
         ? `:${process.env.CLIENT_PORT}`
         : "",
