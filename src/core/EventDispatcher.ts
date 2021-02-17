@@ -1,3 +1,4 @@
+import WebSocket from "ws";
 import { RoomSettings } from "./../config/roomSettings";
 import { Player, PublicMember } from "./Player";
 import { Room, PublicMembers } from "./Room";
@@ -18,6 +19,7 @@ interface Message {
   newLeaderId?: string;
   word?: string;
   scores?: { [playerName: string]: number }; // score announcer data
+  reason?: string; // error reason
 }
 
 interface JoiedMessage {
@@ -63,7 +65,9 @@ export class EventDispatcher {
   private toAllButOne(room: Room, playerId: string, data: Message) {
     room.members.forEach((player, id) => {
       if (id !== playerId) {
-        player.socket.send(this.toJsonStr(data));
+        if (player.socket.readyState === WebSocket.OPEN) {
+          player.socket.send(this.toJsonStr(data));
+        }
       }
     });
   }
@@ -72,7 +76,9 @@ export class EventDispatcher {
    * @param player
    */
   private toPlayer(player: Player, data: Message) {
-    player.socket.send(this.toJsonStr(data));
+    if (player.socket.readyState === WebSocket.OPEN) {
+      player.socket.send(this.toJsonStr(data));
+    }
   }
 
   /**
@@ -82,7 +88,9 @@ export class EventDispatcher {
    */
   private toAll(room: Room, data: Message): void {
     room.members.forEach((player) => {
-      player.socket.send(this.toJsonStr(data));
+      if (player.socket.readyState === WebSocket.OPEN) {
+        player.socket.send(this.toJsonStr(data));
+      }
     });
   }
   /**
@@ -93,7 +101,24 @@ export class EventDispatcher {
   private toAllHasAnswered(room: Room, data: Message): void {
     room.members.forEach((player) => {
       if (player.hasAnswered) {
-        player.socket.send(this.toJsonStr(data));
+        if (player.socket.readyState === WebSocket.OPEN) {
+          player.socket.send(this.toJsonStr(data));
+        }
+      }
+    });
+  }
+
+  /**
+   * Send the event data to all the players that have not found the answer
+   * @param room the room object to send data to
+   * @param data the data to be sent
+   */
+  private toAllHasNotAnswered(room: Room, data: Message): void {
+    room.members.forEach((player) => {
+      if (!player.hasAnswered) {
+        if (player.socket.readyState === WebSocket.OPEN) {
+          player.socket.send(this.toJsonStr(data));
+        }
       }
     });
   }
@@ -260,6 +285,13 @@ export class EventDispatcher {
     const data = { event: "score", scores: room.playersRoundScore };
     this.toAll(room, data);
   }
+  /**
+   *  Event to inform all the clinets in the room of the scores obtained by all the players during a single turn
+   * @param room the game room object
+   */
+  public annouceTurnScores(room: Room): void {
+    this.announceRoundScores(room);
+  }
 
   /**
    * Event to inform the client that the timer has started
@@ -326,6 +358,29 @@ export class EventDispatcher {
   gameEnded(room: Room): void {
     this.toAll(room, {
       event: "gameEnded",
+    });
+  }
+
+  /**
+   * Dispatch an error message to a specific player
+   * @param player the player object
+   * @param reason error detail
+   */
+  errorToPlayer(player: Player, reason: string): void {
+    this.toPlayer(player, {
+      event: "error",
+      reason,
+    });
+  }
+  /**
+   * Dispatch an error message to all player within a room
+   * @param room the room object
+   * @param reason error detail
+   */
+  errorToAll(room: Room, reason: string): void {
+    this.toAll(room, {
+      event: "error",
+      reason,
     });
   }
 }
