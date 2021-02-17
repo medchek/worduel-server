@@ -65,16 +65,15 @@ export class GameServer extends Kernel {
     super();
     this.app = express();
     if (!process.env.CLIENT_ORIGIN) throw new Error("CLIENT ORIGIN UNDEFINED IN ENV");
-    const allowedOrigin =
-      process.env.CLIENT_ORIGIN + process.env.CLIENT_PORT
-        ? `:${process.env.CLIENT_PORT}`
-        : "";
+    // const allowedOrigin = `${process.env.CLIENT_ORIGIN}${
+    //   process.env.CLIENT_PORT ? `:${process.env.CLIENT_PORT}` : ""
+    // }`;
 
     // middlewares
     // server.set("trust proxy", 1) // enable for reverse proxy (ngnix, heroku)
     this.app.use(
       cors({
-        allowedHeaders: [allowedOrigin],
+        // allowedHeaders: ["origin"],
         methods: ["GET"],
       })
     );
@@ -121,13 +120,13 @@ export class GameServer extends Kernel {
    */
   private handleSocketConnection(): void {
     this.ws.on("connection", async (socket, req) => {
-      // rate limitingu
+      // Rate limiting
       try {
         await this.wsGlobalRateLimit.consume(
           req.socket.remoteAddress as string, // this will be verified to never be undefined in the verifyClientHeaders, hence the type cast.
           15 // consume 15 points per request, which equates to 4 attempts per minute
         );
-
+        // verifying the upgrade
         this.verifyClientUrl(req)
           .then((res: VerifiedReqUrlResponse) => {
             const { id, requestType, username } = res;
@@ -136,11 +135,6 @@ export class GameServer extends Kernel {
               req,
               username,
             });
-            // give the client its unique identifier
-            /**
-             * TODO : create or join a room
-             *
-             */
             // * create romm request
             if (requestType === "create") {
               this.roomList
@@ -152,13 +146,14 @@ export class GameServer extends Kernel {
                   // # when the room is successfully created
                   // DEVONLY timeout
                   // setTimeout(() => {
-                  console.log("createNewRoom() room created =>", room.id);
+                  colorConsole().info(`createNewRoom(): room ${room.id}created`);
                   player.setCanSendMessage();
+                  player.setAsRoomCreator();
                   this.eventDispatcher.roomCreated(player, room);
                   // }, 1000);
                 })
                 .catch((err) => {
-                  console.error("createNewRoom() error => ", err);
+                  colorConsole().error("createNewRoom() error => ", err);
                 });
             } else {
               // * Join romm request
@@ -170,12 +165,14 @@ export class GameServer extends Kernel {
                 .then((room) => {
                   // DEVONLY timeout
                   // setTimeout(() => {
-                  console.log("joinedRoom() room joined!");
+                  colorConsole().info(
+                    `joinedRoom(): ${player.username}:${player.id} joined room ${room.id}`
+                  );
                   this.eventDispatcher.roomJoined(player, room);
                   // }, 2000);
                 })
                 .catch((err) => {
-                  console.error("joinRoom() error =>", err);
+                  colorConsole().error("joinRoom() error =>", err);
                 });
             }
 
@@ -356,33 +353,35 @@ export class GameServer extends Kernel {
    * This will handle the client request to upgrade to a websocket connection.
    * It will check for the necessary headers and allow or interrupt the connection accordingly
    */
-  private handleServerUpgrade(): Promise<void> {
-    return new Promise((resolve, reject) => {
-      this.server.on("upgrade", (req: IncomingMessage, socket: Socket) => {
-        if (this.verifyClientHeaders(req)) {
-          colorConsole({ filters: [colors.green] }).log(
-            "WS UPGRADE ACCEPTED AT HANDSHAKE"
-          );
-          resolve();
-        } else {
-          socket.destroy();
-          colorConsole({ filters: [colors.red] }).log("WS UPGRADE REFUSED");
-          throw reject();
-        }
-      });
+  private handleServerUpgrade(): void {
+    // return new Promise((resolve, reject) => {
+    this.server.on("upgrade", (req: IncomingMessage, socket: Socket) => {
+      if (this.verifyClientHeaders(req)) {
+        colorConsole().info("WS UPGRADE ACCEPTED AT HANDSHAKE");
+        // resolve();
+      } else {
+        socket.write("test socket");
+        socket.destroy();
+        colorConsole().error(
+          "WS UPGRADE REFUSED",
+          "INVALID ORIGIN OR NO VALID IP ADDRESS FROM CONNECTED SOCKET"
+        );
+        return;
+      }
     });
+    // });
   }
 
   // should be fired before allowing the connection
   private verifyClientHeaders(req: IncomingMessage): boolean {
     if (!process.env.CLIENT_ORIGIN) throw new Error("CLIENT_ORIGIN env not set!");
+
     const allowedOrigins = [
       // "chrome-extension://cbcbkhdmedgianpaifchdaddpnmgnknn", // temp for dev
-      process.env.CLIENT_ORIGIN + process.env.CLIENT_PORT
-        ? `:${process.env.CLIENT_PORT}`
-        : "",
+      `${process.env.CLIENT_ORIGIN}${
+        process.env.CLIENT_PORT ? `:${process.env.CLIENT_PORT}` : ""
+      }`,
     ];
-
     // if the requesting socket has no ip adress, then block the connection
     if (
       (!req.socket.remoteAddress && !req.headers["x-forwarded-for"]) ||
@@ -390,9 +389,9 @@ export class GameServer extends Kernel {
       !allowedOrigins.includes(req.headers.origin)
     ) {
       // socket.close();
-      console.error(
-        "CONNECTION BLOCKED. NO IP ADDRESS FROM CONNECTED SOCKET OR INVALID ORIGIN"
-      );
+      // colorConsole().error(
+      //   "CONNECTION BLOCKED. NO IP ADDRESS FROM CONNECTED SOCKET OR INVALID ORIGIN"
+      // );
       return false;
     }
 
@@ -410,12 +409,13 @@ export class GameServer extends Kernel {
    */
   verifyClientUrl(req: IncomingMessage): Promise<VerifiedReqUrlResponse> {
     return new Promise((resolve, reject) => {
+      if (!this.verifyClientHeaders(req)) return reject;
       // logic
       if (req.url) {
         const url = decodeURI(req.url.trim());
         if (url.length >= 23 && url.length <= 57) {
           // minimum length is 23 max is 57
-          console.log("verifyClientUrl", url);
+          colorConsole().info("verifyClientUrl() => ", url);
           const [path, paramStr] = url.split("?");
           // if a valid format is present
           if (path && paramStr) {
@@ -499,9 +499,11 @@ export class GameServer extends Kernel {
         "\n",
         colors.green(`websocket:    ws://localhost:${process.env.PORT}`),
         "\n",
-        `expecting requests from origin: ${process.env.CLIENT_ORIGIN}${
-          process.env.CLIENT_PORT ? ":" + process.env.CLIENT_PORT : ""
-        }`
+        colors.blue(
+          `expecting requests from origin: ${process.env.CLIENT_ORIGIN}${
+            process.env.CLIENT_PORT ? ":" + process.env.CLIENT_PORT : ""
+          }`
+        )
       );
     });
   }
