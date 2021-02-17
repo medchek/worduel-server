@@ -24,6 +24,7 @@ export class Player {
   private _ip: string;
   private _joinedRoomId: string | undefined;
   private _canSendMessages = false; // if the client player can send messages
+  private _isRoomCreator = false;
   // Game options
   private _score = 0;
   /** the score attributed to the player during a round */
@@ -91,6 +92,10 @@ export class Player {
     return this._roundScore;
   }
 
+  get isRoomCreator(): boolean {
+    return this._isRoomCreator;
+  }
+
   /**
    * A Player object intented to be sent to the client.
    * @return non-sensitive data (i.e. without socket object, ip..etc) about the player.
@@ -123,6 +128,11 @@ export class Player {
   public resetRoundScore(): void {
     this._roundScore = 0;
   }
+
+  public setAsRoomCreator(): void {
+    this._isRoomCreator = true;
+  }
+
   public addScore(score: number): void {
     this._roundScore = score;
     this._score += score;
