@@ -1,13 +1,12 @@
 import { RoomManager } from "./RoomManager";
 import WebSocket from "ws";
-import { IncomingMessage } from "http";
 import { Player } from "./Player";
 import { nanoid } from "nanoid";
 import { Kernel } from "./Kernel";
 
 interface AddPlayerOptions {
   socket: WebSocket;
-  req: IncomingMessage;
+  clientIp: string;
   username: string;
 }
 interface RemovePlayerOptions {
@@ -41,9 +40,9 @@ export class PlayerManager extends Kernel {
    * @returns the created player object
    */
   createPlayer(options: AddPlayerOptions): Player {
-    const { socket, req, username } = options;
+    const { socket, clientIp, username } = options;
     const uid = nanoid();
-    const player = new Player(socket, req, { id: uid, username });
+    const player = new Player(socket, clientIp, { id: uid, username });
     this.playerList.set(uid, player);
 
     return player;

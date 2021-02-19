@@ -1,3 +1,4 @@
+import { Warden } from "./Warden";
 import { EventListener } from "./EventListener";
 import { PlayerManager } from "./PlayerManager";
 import { RoomManager } from "./RoomManager";
@@ -53,6 +54,8 @@ export class GameServer extends Kernel {
   private app: Express;
   private server: Server;
   private ws: WebSocket.Server;
+
+  private warden = new Warden();
 
   private roomList: RoomManager = new RoomManager();
   private playerList: PlayerManager = new PlayerManager();
@@ -120,78 +123,96 @@ export class GameServer extends Kernel {
    */
   private handleSocketConnection(): void {
     this.ws.on("connection", async (socket, req) => {
+      const clientIp = this.getClientIp(req);
+      if (!clientIp) {
+        this.terminateSocket({
+          socket,
+        });
+        return;
+      }
       // Rate limiting
       try {
         await this.wsGlobalRateLimit.consume(
-          req.socket.remoteAddress as string, // this will be verified to never be undefined in the verifyClientHeaders, hence the type cast.
-          15 // consume 15 points per request, which equates to 4 attempts per minute
+          clientIp, // this will be verified to never be undefined in the verifyClientHeaders, hence the type cast.
+          10 // consume 10 points per request, which equates to 6 attempts per minute
         );
-        // verifying the upgrade
+        // verifying the connection url
         this.verifyClientUrl(req)
-          .then((res: VerifiedReqUrlResponse) => {
+          .then(async (res: VerifiedReqUrlResponse) => {
             const { id, requestType, username } = res;
             const player: Player = this.playerList.createPlayer({
               socket,
-              req,
+              clientIp,
               username,
             });
-            // * create romm request
-            if (requestType === "create") {
-              this.roomList
-                .createNewRoom({
-                  gameId: id,
-                  requestedBy: player,
-                })
-                .then((room) => {
-                  // # when the room is successfully created
-                  // DEVONLY timeout
-                  // setTimeout(() => {
-                  colorConsole().info(`createNewRoom(): room ${room.id}created`);
-                  player.setCanSendMessage();
-                  player.setAsRoomCreator();
-                  this.eventDispatcher.roomCreated(player, room);
-                  // }, 1000);
-                })
-                .catch((err) => {
-                  colorConsole().error("createNewRoom() error => ", err);
-                });
-            } else {
-              // * Join romm request
-              this.roomList
-                .joinRoom({
-                  roomId: typeof id !== "string" ? id.toString() : id,
-                  requestedBy: player,
-                })
-                .then((room) => {
-                  // DEVONLY timeout
-                  // setTimeout(() => {
-                  colorConsole().info(
-                    `joinedRoom(): ${player.username}:${player.id} joined room ${room.id}`
-                  );
-                  this.eventDispatcher.roomJoined(player, room);
-                  // }, 2000);
-                })
-                .catch((err) => {
-                  colorConsole().error("joinRoom() error =>", err);
-                });
-            }
+            this.warden
+              .startTracking(player.ip, requestType === "create")
+              .then(() => {
+                // * create romm request
+                if (requestType === "create") {
+                  this.roomList
+                    .createNewRoom({
+                      gameId: id,
+                      requestedBy: player,
+                    })
+                    .then((room) => {
+                      // # when the room is successfully created
+                      // DEVONLY timeout
+                      // setTimeout(() => {
+                      player.setCanSendMessage();
+                      player.setAsRoomCreator();
+                      colorConsole().info(`createNewRoom(): room ${room.id}created`);
+                      this.eventDispatcher.roomCreated(player, room);
+                      // }, 1000);
+                    })
+                    .catch((err) => {
+                      colorConsole().error("createNewRoom() error => ", err);
+                    });
+                } else {
+                  // * Join romm request
+                  this.roomList
+                    .joinRoom({
+                      roomId: typeof id !== "string" ? id.toString() : id,
+                      requestedBy: player,
+                    })
+                    .then((room) => {
+                      // DEVONLY timeout
+                      // setTimeout(() => {
+                      colorConsole().info(
+                        `joinedRoom(): ${player.username}:${player.id} joined room ${room.id}`
+                      );
+                      this.eventDispatcher.roomJoined(player, room);
+                      // }, 2000);
+                    })
+                    .catch((err) => {
+                      colorConsole().error("joinRoom() error =>", err);
+                    });
+                }
 
-            //---------------------------------------
-            this.onMessage(player, req);
+                //----------------------------------------------------------------------------------------------------
+                this.onMessage(player, req);
 
-            this.onError(player);
-            // handle client disconnection
-            this.onDisconnect(player);
+                this.onError(player);
+                // handle client disconnection
+                this.onDisconnect(player);
+              })
+              .catch(() => {
+                colorConsole().error(
+                  `[WARDEN] ip ${clientIp} room create/join quota reached`
+                );
+              });
+
+            // end verifyClientUrl then()
           })
           .catch((err) => {
             this.terminateSocket({
               socket,
             });
-            console.error(err);
+            colorConsole().error("connect url verification failure: ", err);
           });
       } catch (rejRes) {
         const remainingTime = Math.ceil(rejRes.msBeforeNext / (1000 * 60));
-        console.warn(
+        colorConsole().warn(
           "[handleSocketConnection] on.connection =>",
           `socket ip: "${req.socket.remoteAddress}" was blocked for too many connection attempts`,
           `for a duration of ${remainingTime} minute(s)`
@@ -295,6 +316,9 @@ export class GameServer extends Kernel {
   private onDisconnect(player: Player): void {
     player.socket.on("close", () => {
       // TODO: Redesing this to be handled at the player level not the room
+      // handle the warden ajustements for disconnecting clients
+      this.warden.ipDisconnected(player);
+      // handle room and player removal as well
       this.roomList.handleRoomRemoval(player);
       console.log(`player ${player.username}:${player.id} disconnected`);
     });
@@ -415,7 +439,7 @@ export class GameServer extends Kernel {
         const url = decodeURI(req.url.trim());
         if (url.length >= 23 && url.length <= 57) {
           // minimum length is 23 max is 57
-          colorConsole().info("verifyClientUrl() => ", url);
+
           const [path, paramStr] = url.split("?");
           // if a valid format is present
           if (path && paramStr) {
@@ -456,6 +480,7 @@ export class GameServer extends Kernel {
                         id: toInt(params.id),
                         username,
                       });
+                      colorConsole().info("verifyClientUrl() sucess => ", url);
                       return;
                     }
                     // IF IT IS A JOIN ROOM REQUEST ---------------------------------------------
@@ -467,14 +492,15 @@ export class GameServer extends Kernel {
                         id: params.id,
                         username,
                       });
+                      colorConsole().info("verifyClientUrl() sucess => ", url);
                       return;
-                    } else console.error("invalid room id");
-                  } else console.error("path not equal join or create");
-                } else console.error("username regex failure");
-              } else console.error("username or id not set/not string");
-            } else console.error("params name not username or id");
-          } else console.error("path(join/create) and/or params not set");
-        } else console.error("req.url not set");
+                    } else colorConsole().error("invalid room id");
+                  } else colorConsole().error("path not equal join or create");
+                } else colorConsole().error("username regex failure");
+              } else colorConsole().error("username or id not set/not string");
+            } else colorConsole().error("params name not username or id");
+          } else colorConsole().error("path(join/create) and/or params not set");
+        } else colorConsole().error("req.url not set");
       }
       // if any of the if statements fail, reject
       reject(
@@ -487,8 +513,28 @@ export class GameServer extends Kernel {
   }
 
   /**
+   * captures the client ip from either the request header if behind a reverse proxy, or else from the requesting ip directly
+   * @param req the http client request
+   */
+  private getClientIp(req: IncomingMessage): string | undefined {
+    // caputre the client real ip if the server is hosted behind a reverse proxy
+    if (req.headers["x-forwarded-for"]) {
+      // type checking
+      if (typeof req.headers["x-forwarded-for"] === "string") {
+        return req.headers["x-forwarded-for"].split(/\s*,\s*/)[0];
+      } else {
+        colorConsole().error(
+          "getClientIp(): Unexpected x-forwarded-for type (not string)"
+        );
+      }
+    } else {
+      // otherwise caputre the client ip directly
+      // this can cannot be undefinde as it will be checked for at handshake time
+      return req.socket.remoteAddress as string;
+    }
+  }
+  /**
    * Starts the server
-   * @param port a custom port for attaching the server to.
    */
   public listen(): void {
     this.server.listen(process.env.PORT, () => {

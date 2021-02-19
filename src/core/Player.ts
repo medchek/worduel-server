@@ -1,5 +1,4 @@
 import WebSocket from "ws";
-import { IncomingMessage } from "http";
 
 interface PlayerOptions {
   id: string;
@@ -34,24 +33,10 @@ export class Player {
   /** State used for sending server messages to only players who have correctly answered.  */
   private _hasAnswered = false;
 
-  constructor(socket: WebSocket, request: IncomingMessage, options: PlayerOptions) {
+  constructor(socket: WebSocket, clientIp: string, options: PlayerOptions) {
     const { id, username } = options;
     this._socket = socket;
-    // caputre the client real ip if the server is hosted behind a reverse proxy
-    if (request.headers["x-forwarded-for"]) {
-      // type checking
-      if (typeof request.headers["x-forwarded-for"] === "string") {
-        this._ip = request.headers["x-forwarded-for"].split(/\s*,\s*/)[0];
-      } else {
-        throw new Error(
-          "Player constructor: Unexpected x-forwarded-for type (not string)"
-        );
-      }
-    } else {
-      // otherwise caputre the client ip directly
-      // this can cannot be undefinde as it will be checked for at handshake time
-      this._ip = request.socket.remoteAddress as string;
-    }
+    this._ip = clientIp;
     this._id = id;
     this._username = username;
   }
