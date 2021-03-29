@@ -6,13 +6,12 @@ interface TrackerOptions {
   joinedRooms: number;
 }
 /**
- * TODO: IMPLEMENT IP TRAKCING TO PREVENT MULTIPLE ROOM CREATION BY THE SAME IP
- * This class should be used to handle the prevention of multiple room creation by the same ip
+ * This class should be used to handle the prevention or limitation of multiple room creation by the same ip
  */
 
 export class Warden {
   private tracker: Map<IpAddress, TrackerOptions> = new Map();
-  readonly maxCreate = 2; // maxium number of created rooms allowed per ip
+  readonly maxCreate = 2; // maximum number of created rooms allowed per ip
   readonly maxJoin = 6; // max number of joined room allowed per ip
 
   private isCreateQuotaReached(ipTracker: TrackerOptions): boolean {
@@ -22,24 +21,38 @@ export class Warden {
   private isJoinQuotaReached(ipTracker: TrackerOptions): boolean {
     return ipTracker.joinedRooms == this.maxJoin;
   }
-
-  private decreaseCreatedQuota(trackerEntry: TrackerOptions): void {
+  /**
+   * Restore 1 room creation quota
+   * @param trackerEntry an entry of the tracker
+   * @returns whether the quota has been fully restored
+   */
+  private restoreCreatedQuota(trackerEntry: TrackerOptions): boolean {
     trackerEntry.createdRooms - 1 >= 0
       ? (trackerEntry.createdRooms -= 1)
       : (trackerEntry.createdRooms = 0);
+    return trackerEntry.createdRooms === 0 && trackerEntry.joinedRooms === 0;
   }
-
-  private decreaseJoinedQuota(trackerEntry: TrackerOptions) {
+  /**
+   * Restore 1 room joining quota
+   * @param trackerEntry an entry of the tracker
+   * @returns whether the quota has been fully restored
+   */
+  private restoreJoinedQuota(trackerEntry: TrackerOptions): boolean {
     trackerEntry.joinedRooms - 1 >= 0
       ? (trackerEntry.joinedRooms -= 1)
       : (trackerEntry.joinedRooms = 0);
+    return trackerEntry.createdRooms === 0 && trackerEntry.joinedRooms === 0;
+  }
+
+  private untrack(ip: IpAddress): boolean {
+    return this.tracker.delete(ip);
   }
 
   /**
    * Add an ip address to the tracker
    * @param ip the ip address to track
    * @param create boolean to specify whether the client is creating or joining a room (true or false respectively).
-   * @returns true if the action was successfuly, false if the ip has exceeded its allowed quota
+   * @returns true if the action was successful, false if the ip has already exceeded its allowed quota
    */
   private track(ip: IpAddress, create: boolean): boolean {
     const ipEntry = this.tracker.get(ip);
@@ -55,7 +68,7 @@ export class Warden {
         // increment the room creation tracker
         trackerOptions.createdRooms++;
       } else {
-        // else increment the troom join tracker
+        // else increment the room join tracker
         trackerOptions.joinedRooms++;
       }
       this.tracker.set(ip, trackerOptions);
@@ -108,17 +121,19 @@ export class Warden {
   }
 
   /**
-   * update and adjust the tracker based on the disconneced ip
-   * @param player the disconencted player holding the ip the ip adress
+   * update and adjust the tracker based on the disconnected ip
+   * @param player the disconnected player holding the ip address
    */
   public ipDisconnected(player: Player): void {
     const ip = player.ip;
     const trackerEntry = this.tracker.get(ip);
     if (trackerEntry) {
       if (player.isRoomCreator) {
-        this.decreaseCreatedQuota(trackerEntry);
+        const isRestored = this.restoreCreatedQuota(trackerEntry);
+        if (isRestored) this.untrack(player.ip);
       } else {
-        this.decreaseJoinedQuota(trackerEntry);
+        const isRestored = this.restoreJoinedQuota(trackerEntry);
+        if (isRestored) this.untrack(player.ip);
       }
     } else {
       colorConsole().error(
