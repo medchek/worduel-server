@@ -72,7 +72,7 @@ export class GameServer extends Kernel {
     //   process.env.CLIENT_PORT ? `:${process.env.CLIENT_PORT}` : ""
     // }`;
 
-    // middlewares
+    // middleware
     // server.set("trust proxy", 1) // enable for reverse proxy (ngnix, heroku)
     this.app.use(
       cors({
@@ -84,15 +84,15 @@ export class GameServer extends Kernel {
     // rate limiting
     this.app.use(
       rateLimit({
-        windowMs: 60 * 3600 * 60, // (60 seconds) * 60 = 1 hourse
+        windowMs: 60 * 3600 * 30, // (60 seconds) * 30 = 1/2 hour
         max: 10, // max requests an ip can perform in the windowsMs
         message: "Too many requests",
         onLimitReached: () => {
-          console.log("LIMIT REACHED!");
+          colorConsole().warn("LIMIT REACHED!");
         },
       })
     );
-    // handle http join room request, to check for room existance and availability
+    // handle http join room request, to check for room existence and availability
 
     // create and attach express to the http server
     this.server = createServer(this.app);
@@ -103,7 +103,7 @@ export class GameServer extends Kernel {
     });
 
     this.playerList.attachRoomList(this.roomList);
-    this.roomList.attcahPlayerList(this.playerList);
+    this.roomList.attachPlayerList(this.playerList);
     // activate the core
     this.core();
   }
@@ -134,7 +134,7 @@ export class GameServer extends Kernel {
       try {
         await this.wsGlobalRateLimit.consume(
           clientIp, // this will be verified to never be undefined in the verifyClientHeaders, hence the type cast.
-          10 // consume 10 points per request, which equates to 6 attempts per minute
+          1 // consume 10 points per request, which equates to 6 attempts per minute
         );
         // verifying the connection url
         this.verifyClientUrl(req)
@@ -148,7 +148,7 @@ export class GameServer extends Kernel {
             this.warden
               .startTracking(player.ip, requestType === "create")
               .then(() => {
-                // * create romm request
+                // * create room request
                 if (requestType === "create") {
                   this.roomList
                     .createNewRoom({
@@ -169,7 +169,7 @@ export class GameServer extends Kernel {
                       colorConsole().error("createNewRoom() error => ", err);
                     });
                 } else {
-                  // * Join romm request
+                  // * Join room request
                   this.roomList
                     .joinRoom({
                       roomId: typeof id !== "string" ? id.toString() : id,
@@ -247,11 +247,11 @@ export class GameServer extends Kernel {
 
         // first check if the player (client) is allowed to send messages
         if (!player.canSendMessages) {
-          console.warn("player cannot yet send messages");
+          colorConsole().warn(`player ${player.ip} cannot yet send messages`);
           return;
         }
         colorConsole().log(`Message received by ${player.username}:${player.id}`); // checks if the message event is working
-        // any suspecious data content should terminate the socket connection
+        // any suspicious data content should terminate the socket connection
 
         // if the message is of type string and its length does not exceed 255
         if (
@@ -264,15 +264,16 @@ export class GameServer extends Kernel {
             const clientEvent = JSON.parse(messageData.trim());
 
             // the data received should have a valid type by now,
-            // furthre check the validity of data
+            // further check the validity of data
             this.eventListener
               .listen(player, clientEvent)
               .then(() => {
                 // DEVONLY check message content
-                colorConsole({ filters: [colors.green] }).log(clientEvent);
+                colorConsole().info(clientEvent);
               })
               .catch((err) => {
-                throw new Error(`Listen() catch : ${err}`);
+                colorConsole().error(`Listen() catch : ${err}`);
+                return;
               });
             // socket.send(JSON.stringify(clientEvent));
           } catch (err) {
@@ -280,29 +281,26 @@ export class GameServer extends Kernel {
             this.terminateSocket({
               socket,
               block: {
-                ip: req.socket.remoteAddress as string,
+                ip: player.ip,
                 blockDurationSeconds: 60 * 60,
               },
             });
-            console.error(
-              new Error("onMessage() => invalid json string"),
-              err,
-              messageData
-            );
+            colorConsole().error("onMessage() => invalid json string", err, messageData);
           }
         } else {
-          console.error(new Error("message checking failed"));
+          colorConsole().error("Message checking failed");
           // on check fail
           this.terminateSocket({
             socket,
             block: {
-              ip: req.socket.remoteAddress as string,
+              ip: player.ip,
               blockDurationSeconds: 60 * 60,
             },
           });
         }
       } catch (err) {
         // on limit reached
+        colorConsole().error(`onMessage global limiter : limit reached${err}`);
       }
     });
   }
@@ -315,8 +313,7 @@ export class GameServer extends Kernel {
 
   private onDisconnect(player: Player): void {
     player.socket.on("close", () => {
-      // TODO: Redesing this to be handled at the player level not the room
-      // handle the warden ajustements for disconnecting clients
+      // handle the warden adjustments for disconnecting clients
       this.warden.ipDisconnected(player);
       // handle room and player removal as well
       this.roomList.handleRoomRemoval(player);
@@ -400,26 +397,34 @@ export class GameServer extends Kernel {
   private verifyClientHeaders(req: IncomingMessage): boolean {
     if (!process.env.CLIENT_ORIGIN) throw new Error("CLIENT_ORIGIN env not set!");
 
+    console.log(
+      "[TEST HEADERS] printing request data",
+      "ip = ",
+      req.socket.remoteAddress,
+      ", port = ",
+      req.socket.remotePort,
+      "FULL REQUEST => ",
+      req
+    );
+
     const allowedOrigins = [
       // "chrome-extension://cbcbkhdmedgianpaifchdaddpnmgnknn", // temp for dev
       `${process.env.CLIENT_ORIGIN}${
         process.env.CLIENT_PORT ? `:${process.env.CLIENT_PORT}` : ""
       }`,
     ];
-    // if the requesting socket has no ip adress, then block the connection
+    // if the requesting socket has no ip address, then block the connection
     if (
-      (!req.socket.remoteAddress && !req.headers["x-forwarded-for"]) ||
+      (!req.socket.remoteAddress &&
+        !req.headers["X-Forwarded-For"] &&
+        !req.headers["X-Forwarded-Port"]) ||
       !req.headers.origin ||
       !allowedOrigins.includes(req.headers.origin)
     ) {
-      // socket.close();
-      // colorConsole().error(
-      //   "CONNECTION BLOCKED. NO IP ADDRESS FROM CONNECTED SOCKET OR INVALID ORIGIN"
-      // );
       return false;
+    } else {
+      return true;
     }
-
-    return true;
   }
 
   /**
@@ -429,7 +434,7 @@ export class GameServer extends Kernel {
    * - Furthermore, a username parameters must be provided as well as either of a gameId or roomId params if the sockets is creating or joining a room respectively.
    * - The absence of any of the params and/or path or fail in the authenticity of the types and values of the params will result in the socket termination and ip block
    * @param socket the socket object requesting the action
-   * @param req the request object containg the url
+   * @param req the request object containing the url
    */
   verifyClientUrl(req: IncomingMessage): Promise<VerifiedReqUrlResponse> {
     return new Promise((resolve, reject) => {
@@ -480,7 +485,7 @@ export class GameServer extends Kernel {
                         id: toInt(params.id),
                         username,
                       });
-                      colorConsole().info("verifyClientUrl() sucess => ", url);
+                      colorConsole().info("verifyClientUrl() success => ", url);
                       return;
                     }
                     // IF IT IS A JOIN ROOM REQUEST ---------------------------------------------
@@ -492,7 +497,7 @@ export class GameServer extends Kernel {
                         id: params.id,
                         username,
                       });
-                      colorConsole().info("verifyClientUrl() sucess => ", url);
+                      colorConsole().info("verifyClientUrl() success => ", url);
                       return;
                     } else colorConsole().error("invalid room id");
                   } else colorConsole().error("path not equal join or create");
@@ -505,7 +510,7 @@ export class GameServer extends Kernel {
       // if any of the if statements fail, reject
       reject(
         new Error(
-          "[SERVER.ts=>verifyClientUrl()] A check error occured when analysing the join/create url"
+          "[SERVER.ts=>verifyClientUrl()] A check error occurred when analyzing the join/create url"
         )
       );
       return;
@@ -517,7 +522,7 @@ export class GameServer extends Kernel {
    * @param req the http client request
    */
   private getClientIp(req: IncomingMessage): string | undefined {
-    // caputre the client real ip if the server is hosted behind a reverse proxy
+    // capture the client real ip if the server is hosted behind a reverse proxy
     if (req.headers["x-forwarded-for"]) {
       // type checking
       if (typeof req.headers["x-forwarded-for"] === "string") {
@@ -528,8 +533,8 @@ export class GameServer extends Kernel {
         );
       }
     } else {
-      // otherwise caputre the client ip directly
-      // this can cannot be undefinde as it will be checked for at handshake time
+      // otherwise capture the client ip directly
+      // this can cannot be undefined as it will be checked for at the handshake process
       return req.socket.remoteAddress as string;
     }
   }
