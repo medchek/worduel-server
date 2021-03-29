@@ -9,10 +9,6 @@ import toInt from "validator/lib/toInt";
 import { Kernel } from "./Kernel";
 // used to
 
-interface RoomListOptions {
-  allowSameIp?: boolean;
-}
-
 interface CreateRoomOptions {
   requestedBy: Player;
   gameId: number | string;
@@ -28,15 +24,10 @@ interface JoinRoomOptions {
 export class RoomManager extends Kernel {
   private roomList: Map<string, Room> = new Map();
   private playerList!: PlayerManager;
-  private ipInsideRoom: Set<string> = new Set(); // tracks the ips that are in rooms
   private allowSameIp = false;
 
-  constructor(options?: RoomListOptions) {
+  constructor() {
     super();
-    // whether to allow the same ip to join or create multiple rooms
-    if (options) {
-      this.allowSameIp = options.allowSameIp || false;
-    }
   }
 
   /**
@@ -45,7 +36,7 @@ export class RoomManager extends Kernel {
    * This will allow this class to interact with the players manager thus making it very flexible.
    * @param playerList the player list that the room manager needs to interact with
    */
-  attcahPlayerList(playerList: PlayerManager): void {
+  attachPlayerList(playerList: PlayerManager): void {
     this.playerList = playerList;
   }
 
@@ -76,7 +67,7 @@ export class RoomManager extends Kernel {
   /**
    * creates a new room based on the data provided in the options
    * @param options CreateRoomOptions interface
-   * @returns Promise - on success, returns the created room objcet.
+   * @returns Promise - on success, returns the created room object.
    * On error, the promise rejects with an error object containing an error code and the duration the users should be blocked for
    */
   createNewRoom(options: CreateRoomOptions): Promise<Room> {
@@ -84,14 +75,14 @@ export class RoomManager extends Kernel {
       const { requestedBy, gameId } = options;
       // generate a random unique room id
       const roomId = nanoid();
-      // check if the player hasnt already created/joined a room,
+      // check if the player hasn't already created/joined a room,
       // TODO: CHECK FOR IP IF IT HAS CREATED/JOINED ROOM
       const createRoomOptions: RoomOptions = {
         requestedBy: requestedBy,
         gameId: typeof gameId === "string" ? toInt(gameId) : gameId,
         id: roomId,
       };
-      // load the game class that according to the gameId
+      // load the game class that corresponds to the gameId
       // where 1: Shuffler, 2: ToBeImplemented...etc
       if (gameId === 1) {
         const gameRoom = new Shuffler(createRoomOptions);
@@ -100,7 +91,7 @@ export class RoomManager extends Kernel {
         requestedBy.setAsLeader();
         resolve(gameRoom);
       } else {
-        // if the gameId is not allowed/recognzied,
+        // if the gameId is not allowed/recognized,
         console.error(new Error("RoomManager.createNewRoom() => Invalid gameId"));
         // = REJECT
         reject({
@@ -115,7 +106,7 @@ export class RoomManager extends Kernel {
    * Add the player to the room that matches the provided room id
    * @param options JoinRoomOptions interface
    * @returns Promise resolve: on success, returns the created room object
-   * @returns Promsie rejcet: On error (non existant room, full room), the promise rejects with an error object containing an error code and the duration the users should be blocked for
+   * @returns Promise reject: On error (non existent room, full room), the promise rejects with an error object containing an error code and the duration the users should be blocked for
    */
   joinRoom(options: JoinRoomOptions): Promise<Room> {
     return new Promise((resolve, reject) => {
@@ -151,7 +142,7 @@ export class RoomManager extends Kernel {
   private removeRoom(roomId: string): boolean {
     let removed = false;
     const targetRoom = this.getRoom(roomId);
-    // disconenct and remove all players if there are any
+    // disconnect and remove all players if there are any
     if (targetRoom) {
       if (!targetRoom.isEmpty) {
         targetRoom.members.forEach((player) => {
@@ -189,7 +180,7 @@ export class RoomManager extends Kernel {
             newLeaderId = newLeader.id;
             // console.log("after=> ", newLeader);
           }
-          // delte the player from the room members
+          // delete the player from the room members
           room.members.delete(player.id);
         }
         // delete the player from the playerList as well
