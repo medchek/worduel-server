@@ -17,12 +17,16 @@ interface Message {
   sid?: number; // setting id
   sval?: number | string;
   newLeaderId?: string;
-  word?: string;
+  word?: string; // the hint word
+  worldLen?: number; // hint word length for games that should no reveal the whole word letters
+  wordList?: string[]; // word to guess that the current player can chose from
   scores?: { [playerName: string]: number }; // score announcer data
   reason?: string; // error reason
+  playerName?: string;
+  hint?: string; // a hint sentence/word/phrase the current player can send to other players for games that feature this option
 }
 
-interface JoiedMessage {
+interface JoinedMessage {
   event: "roomJoined";
   playerId: string;
   roomId: string;
@@ -30,7 +34,7 @@ interface JoiedMessage {
   party: PublicMembers;
   settings?: RoomSettings;
   word?: string;
-  roundPhase?: number;
+  phase?: number;
   remainingTime?: number;
   round?: number;
   scores?: { [playerName: string]: number };
@@ -41,13 +45,13 @@ export interface MessageOptions {
   player: Player;
   room: Room;
   message: string;
-  type: number; // the type of the message. 0 = regular. 1 = just found answer. 2 = already aswered
+  type: number; // the type of the message. 0 = regular. 1 = just found answer. 2 = already answered
 }
 
 interface ChatMessage {
   event: string;
   from: string;
-  type: number; // the type of the message. 0 = regular. 1 = just found answer. 2 = already aswered
+  type: number; // the type of the message. 0 = regular. 1 = just found answer. 2 = already answered
   message?: string;
   playerId?: string;
 }
@@ -149,30 +153,30 @@ export class EventDispatcher {
    * @param room the room object
    */
   public roomJoined(player: Player, room: Room): void {
-    // FIXME FIXED : client also needs to recive current room settings (selected game, difficulty, round count...etc)
-    // FIXME send remaining time, round n°, wordToGuess, scores, currentPlayer (when needed) if joining the game that is ongoing
+    // FIXME FIXED : client also needs to receive current room settings (selected game, difficulty, round count...etc)
+    // FIXME FIXED : send remaining time, round n°, wordToGuess, scores, currentPlayer (when needed) if joining the game that is ongoing
     // which are yet to be implemented
-    const data: JoiedMessage = {
+    const data: JoinedMessage = {
       event: "roomJoined",
       playerId: player.id,
       roomId: room.id,
       gameId: room.gameId,
       party: room.publicMembers,
     };
-    // TODO: only send settings that hhave changed from the default upon room join for optimisation
+    // TODO: only send settings that have changed from the default upon room join for optimization
     if (!room.isDefaultSettings) {
       data.settings = room.roomSettings;
     }
     // # if the game has started, include more data
     if (room.hasGameStarted) {
       //
-      data.roundPhase = room.roundPhase;
+      data.phase = room.phase;
       data.word = room.hintWord;
       data.round = room.currentRound;
-      if (room.roundPhase == 2) {
-        data.remainingTime = room.reminaingTime;
+      if (room.phase == 2) {
+        data.remainingTime = room.remainingTime;
       }
-      if (room.roundPhase == 3) {
+      if (room.phase == 3) {
         data.scores = room.playersRoundScore;
       }
     }
@@ -196,15 +200,15 @@ export class EventDispatcher {
     this.toAllButOne(room, player.id, data);
   }
   /**
-   * Event to inform all the clients in the room except the disconnected player that a memeber has left the room
+   * Event to inform all the clients in the room except the disconnected player that a member has left the room
    * @param room the room object that was joined
    * @param player the Player object that has joined the room
-   * @param newLaederId the id of the new room leader, if any.
+   * @param newLeaderId the id of the new room leader, if any.
    */
   public playerHasDisconnected(
     room: Room,
     player: Player,
-    newLaederId: string | null
+    newLeaderId: string | null
   ): void {
     //
     const data: Message = {
@@ -212,8 +216,8 @@ export class EventDispatcher {
       playerId: player.id,
     };
     // send the new leader id if it was passed
-    if (newLaederId) {
-      data.newLeaderId = newLaederId;
+    if (newLeaderId) {
+      data.newLeaderId = newLeaderId;
     }
     // this.toAllButOne(room, player.id, data);
     this.toAll(room, data);
@@ -247,37 +251,57 @@ export class EventDispatcher {
   /**
    * Event to inform all the players than a new round is about to start
    * @param room the game room object
-   * @param word the word that helps send to the client
+   * @param word the word that helps the client to figure out the word to guess
    */
-  public announceNewRound(room: Room, word: string): void {
-    this.toAll(room, {
+  public announceNewRound(room: Room, word?: string): void {
+    // only send the word if the room does not feature a turn system
+    // in which case the hint word is sent through the announceTurn event since a word must be sent for each turn
+    const data: Message = {
       event: "newRound",
-      word,
-    });
+    };
+    // only send the word if it's passed
+    if (word) data.word = word;
+    this.toAll(room, data);
   }
 
   /**
    * Event to inform all the players in the room of a new player's turn
    * @param room the game room object
-   * @param playerId the id of the player that is to play currently
+   * @param playerName the username of the player who is to play currently
    */
-  public annouceTurn(room: Room, playerId: string): void {
+  public announceNewTurn(room: Room, playerName: string): void {
     this.toAll(room, {
       event: "newTurn",
-      playerId: playerId,
+      playerName,
     });
   }
-
-  public announcePlayerIsSelectingWord(room: Room, playerId: string): void {
-    this.toAllButOne(room, playerId, {
-      event: "selectingWord",
-      playerId,
+  /**
+   * Event to inform all the players but the current one to play that a players is picking up a word.
+   * Also provides the current player with a word list from which a word can be selected as the current one to be guessed by the other players
+   * @param room  the room object
+   * @param player the current player's object
+   * @param words a 3 words array that the current player can chose from as the word to guess of the current turn
+   */
+  public announcePlayerIsSelectingWord(
+    room: Room,
+    player: Player,
+    wordList: string[]
+  ): void {
+    // send a first message to the players currently not playing informing them that the current player is picking up a word
+    this.toAllButOne(room, player.id, {
+      event: "wordSelect",
+      playerName: player.username,
+    });
+    // send a message to the current playing player the word list from which to select a word to guess from
+    this.toPlayer(player, {
+      event: "wordSelect",
+      wordList,
     });
   }
   // wordSelection: { id: number; word: string }[]
 
   /**
-   * Event to inform all the clinets in the room of the scores obtained by all the players during a single round
+   * Event to inform all the clients in the room of the scores obtained by all the players during a single round
    * @param room the game room object
    */
   public announceRoundScores(room: Room): void {
@@ -286,10 +310,10 @@ export class EventDispatcher {
     this.toAll(room, data);
   }
   /**
-   *  Event to inform all the clinets in the room of the scores obtained by all the players during a single turn
+   *  Event to inform all the clients in the room of the scores obtained by all the players during a single turn
    * @param room the game room object
    */
-  public annouceTurnScores(room: Room): void {
+  public announceTurnScores(room: Room): void {
     this.announceRoundScores(room);
   }
 
@@ -303,9 +327,16 @@ export class EventDispatcher {
     });
   }
 
+  public sendHint(player: Player, room: Room, hint: string): void {
+    this.toAllButOne(room, player.id, {
+      event: "hint",
+      hint,
+    });
+  }
+
   /**
    * Forward a message to the client chat
-   * @param options The message options. The message type option is espcially required in order to send
+   * @param options The message options. The message type option is especially required in order to send
    * the message to either all the clients in the chat or only the ones who have already found the correct answer.
    */
   public sendChatMessage(options: MessageOptions): void {
@@ -317,8 +348,8 @@ export class EventDispatcher {
       from: player.username,
     };
     // if the player has found the answer, send two separate events
-    // one: to infrom all the players but the one who answered that x player has answered correctly
-    // two: to infrom the player who just answered correctly of his successful answer
+    // one: to inform all the players but the one who answered that x player has answered correctly
+    // two: to inform the player who just answered correctly of his successful answer
     if (type === 1) {
       // send a message informing the players who haven't gotten the answer yet that playerId has found the correct answer, excluding the answer (message)
       // the playerId is included to target the player within the party object and change the client state accordingly

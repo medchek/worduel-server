@@ -5,8 +5,6 @@ import { PlayerManager } from "./PlayerManager";
 import { Player } from "./Player";
 import { Kernel } from "./Kernel";
 
-import {} from "validator";
-
 import {
   difficultySettings,
   roundCountSettings,
@@ -15,18 +13,22 @@ import {
 import Joi from "joi";
 import { Room } from "./Room";
 
-interface EventListenerConsturctor {
+import escape from "validator/lib/escape";
+
+interface EventListenerConstructor {
   roomList: RoomManager;
   playerList: PlayerManager;
   // player: Player;
 }
-interface EventListenerBase extends EventLisenerData {
+interface EventListenerBase extends EventListenerData {
   event: string;
 }
-interface EventLisenerData {
+export interface EventListenerData {
   settingId?: number;
   settingValue?: number;
   answer?: string;
+  idx?: number;
+  hint?: string;
 }
 
 export class EventListener extends Kernel {
@@ -37,13 +39,19 @@ export class EventListener extends Kernel {
     duration: 5,
     blockDuration: 10,
   });
-  constructor(eventListenerConstructor: EventListenerConsturctor) {
+
+  private hintLimiter = new RateLimiterMemory({
+    points: 1,
+    duration: 2,
+  });
+
+  constructor(eventListenerConstructor: EventListenerConstructor) {
     super();
     this.roomList = eventListenerConstructor.roomList;
     this.playerList = eventListenerConstructor.playerList;
   }
   /**
-   * Core of the event listener. It process the raw json recived by the client and reacts to the different events accordingly
+   * Core of the event listener. It process the raw json received by the client and reacts to the different events accordingly
    * @param player the player object that belongs to the client
    * @param data json data received from the client
    */
@@ -64,20 +72,34 @@ export class EventListener extends Kernel {
         switch (event) {
           case "setSettings":
             this.onSetSettings(player, room, params)
-              .then(() => resolve)
-              .catch(() => reject);
+              .then(() => resolve())
+              .catch(() => reject());
             break;
           case "start":
             this.onStartGame(player, room)
-              .then(() => resolve)
-              .catch(() => reject);
+              .then(() => resolve())
+              .catch(() => reject());
             break;
           case "answer":
             if (data.answer) {
               this.onAnswer(player, room, data.answer)
-                .then(() => resolve)
-                .catch(() => reject);
-            } else reject;
+                .then(() => resolve())
+                .catch(() => reject());
+            } else reject();
+            break;
+          case "wordSelected":
+            if (data.idx) {
+              this.onWordSelect(player, room, data.idx)
+                .then(() => resolve())
+                .catch(() => reject());
+            } else reject();
+            break;
+          case "hint":
+            if (data.hint) {
+              this.onHint(player, room, data.hint)
+                .then(() => resolve())
+                .catch(() => reject());
+            } else reject();
             break;
           default:
             reject("invalid settings event");
@@ -94,7 +116,11 @@ export class EventListener extends Kernel {
    * @param player the player object that belongs to the client
    * @param data data containing setting id & setting value
    */
-  async onSetSettings(player: Player, room: Room, data: EventLisenerData): Promise<void> {
+  async onSetSettings(
+    player: Player,
+    room: Room,
+    data: EventListenerData
+  ): Promise<void> {
     if (!player.isLeader) throw new Error("Player is not leader");
     if (room.hasGameStarted) throw new Error("Unauthorized, game has already started");
 
@@ -183,6 +209,51 @@ export class EventListener extends Kernel {
       }
     });
   }
+  /**
+   * Client hint word selection event
+   * @param wordIndex the index of the selected word among the three items in the array
+   */
+  async onWordSelect(player: Player, room: Room, wordIndex: number): Promise<void> {
+    return new Promise((resolve, reject) => {
+      if (
+        player.isTurn &&
+        player.canSelectWord &&
+        room.phase == 1.2 && // 1.2 = word selection window phase
+        wordIndex >= 0 &&
+        wordIndex <= 2
+      ) {
+        //
+        room.playerHasSelectedWord(player, wordIndex);
+        resolve();
+      } else {
+        reject();
+        player.socket.close();
+      }
+    });
+  }
+
+  /**
+   * The current player sends a hint to the other players in the room
+   * @param player
+   * @param room
+   * @param hint
+   */
+  async onHint(player: Player, room: Room, hint: string): Promise<void> {
+    try {
+      await this.hintLimiter.consume(player.ip, 1);
+      return new Promise((resolve, reject) => {
+        if (room.hasGameStarted && room.hasTurns && room.phase === 2 && player.isTurn) {
+          if (hint.length > 0 && hint.length <= 150) {
+            room.hintReceived(player, escape(hint));
+            resolve();
+          } else reject();
+          //
+        } else reject();
+      });
+    } catch (err) {
+      throw new Error("onHint => hintLimiter reached");
+    }
+  }
 
   /**
    * Client sending chat message
@@ -192,10 +263,13 @@ export class EventListener extends Kernel {
    */
   async onAnswer(player: Player, room: Room, answer: string): Promise<void> {
     try {
-      await this.chatLimiter.consume(player.ip, 1);
+      await this.chatLimiter.consume(`${player.ip}:${player.id}`, 1);
       // if the answer is of acceptable size, proceed
       if (answer.length < 100) {
         if (room.hasGameStarted) {
+          // also only players that are not currently playing can send answers
+          if (player.isTurn)
+            throw new Error("Unauthorized action: currently playing client sent answer");
           // only if the game has started
           room
             .checkAnswer(player, answer.trim())
@@ -231,7 +305,7 @@ export class EventListener extends Kernel {
             .catch(() => {
               throw new Error("[room.checkAnswer()] Unexpected user input.");
             });
-        }
+        } else throw new Error("[onAnswer()] Game has not started yet");
       } else throw new Error("[onAnswer()] answer length exceeds what is allowed");
     } catch (err) {
       // if the rate limiter kicks in
