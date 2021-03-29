@@ -32,6 +32,8 @@ export class Player {
   private _isLeader = false;
   /** State used for sending server messages to only players who have correctly answered.  */
   private _hasAnswered = false;
+  // State to allow a specific player per turn to select a word
+  private _expectSelectWord = false;
 
   constructor(socket: WebSocket, clientIp: string, options: PlayerOptions) {
     const { id, username } = options;
@@ -81,8 +83,12 @@ export class Player {
     return this._isRoomCreator;
   }
 
+  get canSelectWord(): boolean {
+    return this._expectSelectWord;
+  }
+
   /**
-   * A Player object intented to be sent to the client.
+   * A Player object intended to be sent to the client.
    * @return non-sensitive data (i.e. without socket object, ip..etc) about the player.
    */
   get getAsPublicMember(): PublicMember {
@@ -121,5 +127,9 @@ export class Player {
   public addScore(score: number): void {
     this._roundScore = score;
     this._score += score;
+  }
+
+  public setCanSelectWord(value = true): void {
+    this._expectSelectWord = value;
   }
 }

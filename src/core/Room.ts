@@ -1,3 +1,4 @@
+import { colorConsole } from "tracer";
 import { EventDispatcher } from "./EventDispatcher";
 import {
   defaultRoomSettings,
@@ -6,6 +7,7 @@ import {
   timePerRoundSettings,
 } from "./../config/roomSettings";
 import { Player, PublicMember } from "./Player";
+import { randomNumber } from "./utils";
 
 export interface RoomOptions {
   maxSlots?: number;
@@ -30,13 +32,14 @@ export abstract class Room {
   // room default settings
   protected _settings = { ...defaultRoomSettings }; // timePerRound, difficulty, roundCount
   // ** GAME STATE
-  /** round phases. Used to inform the client which game component to load when joining an ongoing game
+  /** game phases. Used to inform the client which game component to load when joining an ongoing game
    * - 1 = new round / before timer start.
-   * - 1.1 = turn announcer (if game allows it)
+   * - 1.1 = new turn / turn announcer (if game allows it)
    * - 1.2 = player word selection window (if game allows it)
    * - 2 = timer started / round ongoing.
-   * - 3 = timer stopped / round ended/ score announcing */
-  protected _roundPhase = 1;
+   * - 3 = timer stopped / turn ended / turn score announcing
+   * - 4 = timer stopped / round ended/ round score announcing */
+  protected _phase = 1;
   /** Whether the game features a turn system where each player gets to play once per round */
   protected abstract _hasTurns: boolean;
   /** When hasTurn is true this, can be set to allow players to select a word among three when their turn comes  */
@@ -44,9 +47,12 @@ export abstract class Room {
   protected _hasStarted = false;
   protected _gameEnded = false;
   protected _currentPlayerIndex: number | null = null;
+  protected _currentTurn = 0;
   protected _currentRound = 0;
   protected _isLobby = true;
   protected _wordToGuess: string | undefined;
+  /** The generated words that the current player can select a word from to be guessed by the other players in the room */
+  protected _wordsToSelectFrom: string[] = [];
   /** Word used to help the player guess the wordToGuess */
   protected _hintWord: string | undefined;
 
@@ -54,13 +60,16 @@ export abstract class Room {
   protected _timer: NodeJS.Timeout | null = null;
   protected _timerStartedAt = 0;
 
-  /** time between annoucing a round and starting the timer (in seconds) */
+  /** Used to store the timeout for the waitBeforeStop function */
+  protected _sleep: NodeJS.Timeout | null = null;
+
+  /** time between announcing a round and starting the timer (in seconds) */
   protected _timeBeforeTimerStart = 4;
-  protected _currentWord = "";
+  // private _currentWord = "";
 
   /** The base score value that the first player who answers correctly should earn per round */
   protected _baseScore = 50;
-  /** Amount to remove from the score calculation formula. The greater it is, the less points the player gets. Maxium is the number of players */
+  /** Amount to remove from the score calculation formula. The greater it is, the less points the player gets. Maximum is the number of players */
   protected _scoreSubtractor = 0;
   /**  the number of player who found the correct answer during a round. Used to end the round if all player have found the current answer before the timer runs out */
   protected _correctAnswerCount = 0;
@@ -129,22 +138,38 @@ export abstract class Room {
     return this._hintWord;
   }
 
+  get hasTurns(): boolean {
+    return this._hasTurns;
+  }
+
   /** round phases. Used to inform the client which game component to load when joining an ongoing game
    * - 1 = new round / before timer start.
    * - 1.1 = turn announcer (if game allows it)
    * - 1.2 = player word selection window (if game allows it)
    * - 2 = timer started / round ongoing.
-   * - 3 = timer stopped / round ended/ score announcing */
-  get roundPhase(): number {
-    return this._roundPhase;
+   * - 3 = timer stopped / turn ended / turn score announcing
+   * - 4 = timer stopped / round ended/ score announcing */
+  get phase(): number {
+    return this._phase;
   }
 
-  /** retuns true if all players have found the answer, false oherwise */
+  get isLastTurn(): boolean {
+    if (!this._currentPlayerIndex) return false;
+    if (this._currentPlayerIndex + 1 === this.memberCount) {
+      return true;
+    } else return false;
+  }
+
+  get isLastRound(): boolean {
+    return this._currentRound == this._settings.roundCount;
+  }
+
+  /** returns true if all players have found the answer, false otherwise */
   get hasAllAnswered(): boolean {
     return this._correctAnswerCount == this.memberCount;
   }
 
-  /** Get the data of the members of the room that are intented to be sent to the client */
+  /** Get the data of the members of the room that are intended to be sent to the client */
   get publicMembers(): PublicMembers {
     const publicMembers: PublicMembers = {};
     this.members.forEach((member, playerIdKey) => {
@@ -154,7 +179,7 @@ export abstract class Room {
   }
 
   /** Return the time remaining before the timer ends */
-  get reminaingTime(): number {
+  get remainingTime(): number {
     return (
       this._settings.timePerRound - Math.floor((Date.now() - this._timerStartedAt) / 1000)
     );
@@ -190,6 +215,11 @@ export abstract class Room {
   public removeMember(playerId: string): boolean {
     return this._members.delete(playerId);
   }
+
+  public getMember(playerId: string): Player | undefined {
+    return this._members.get(playerId);
+  }
+
   public clearMembers(): void {
     this._members.clear();
   }
@@ -212,7 +242,7 @@ export abstract class Room {
   }
 
   /**
-   * Sets the maximum number of player for this room
+   * Sets the maximum number of players for this room
    * @param max Max number of players that can join the room. Between 2 and 10 max players
    */
   protected setMaxSlot(max: number): void {
@@ -224,7 +254,7 @@ export abstract class Room {
   }
 
   /**
-   * Sets the first avaible player as a new leader
+   * Sets the first available player as a new leader
    * @return new leader Player object
    */
   public setNewRoomLeader(): Player {
@@ -249,7 +279,7 @@ export abstract class Room {
     return new Promise((resolve, reject) => {
       if (sid == 1) {
         // the difficulty will be computed according to the id not the string value
-        // therfore, set it directly as the setting value
+        // therefore, set it directly as the setting value
         this._settings.difficulty = valueId;
         // resolve
         resolve({ sid, value: valueId });
@@ -271,8 +301,11 @@ export abstract class Room {
     });
   }
 
-  /** Sets the next player to play and return the id of said player */
-  protected setNextPlayer(): string {
+  /**
+   * Sets the next player to play and return the id of said player
+   * @returns player's id for the current turn
+   */
+  protected setNextPlayerTurn(): string {
     if (!this._hasTurns) throw new Error("This game does not feature a turn system");
     const members = Array.from(this._members);
     if (!this._currentPlayerIndex) {
@@ -300,7 +333,7 @@ export abstract class Room {
     // FIXME LATENCY EMULATOR
     setTimeout(() => {
       //-----------
-      // if the game has already started, dont do anything
+      // if the game has already started, don't do anything
       if (this.hasGameStarted) {
         console.warn(`Game in room ${this.id} has already started`);
         return;
@@ -337,6 +370,29 @@ export abstract class Room {
       }, seconds * 1000);
     });
   }
+  /**
+   * A timer to wait before executing subsequent code.
+   * - This function stores the timeout in memory to be able to stop it at any time using the stopWaiting function
+   * @param seconds the number of seconds to sleep for
+   * @param fn an optional function to execute at the end of the timer
+   */
+  private await(seconds: number, fn?: () => void): Promise<void> {
+    return new Promise((resolve) => {
+      this._sleep = setTimeout(() => {
+        if (fn) fn();
+        this.stopWaiting();
+        resolve();
+      }, seconds * 1000);
+    });
+  }
+  /** Stop the sleep time and resets it
+   * @param fn an optional function to execute at the end of the timer
+   */
+  private stopWaiting(fn?: () => void): void {
+    if (this._sleep) clearTimeout(this._sleep);
+    if (fn) fn();
+    this._sleep = null;
+  }
 
   /**
    * Runs a complete round lifecycle
@@ -351,43 +407,98 @@ export abstract class Room {
     this.stopTimer();
     // logic to run before announcing the round
     const word = await this.onBeforeRoundStart();
-    // annonce the beginning of a new round
+    // announce the beginning of a new round
     this._dispatch.announceNewRound(this, word);
     // wait for the time before firing the timer
-    await this.timeBeforeStartTimer();
-    this.onRoundStart();
+    // await this.timeBeforeStartTimer();
+    await this.wait(this._timeBeforeTimerStart);
+    // this.onRoundStart();
     // start the timer
     await this.startTimer();
     return Promise.resolve();
   }
   /** Runs a complete round lifecycle including turns for each player */
-  private async newTurnCycle(): Promise<void> {
-    // to be implemented later
+  private async newRoundWithTurns(): Promise<void> {
+    if (this._gameEnded) return;
+    if (this._currentRound > 1) this.resetRoundState();
+    // announce a new round
+    this._dispatch.announceNewRound(this);
+    // wait before announcing the new turn
+    await this.wait(3);
+    // wait for a full turn cycle
+    await this.newTurn();
   }
 
+  /** Runs a complete turn cycle */
+  private async newTurn(): Promise<void> {
+    this.resetTurnState();
+    this.stopTimer(); // stop the timer if it's still running
+    this._wordsToSelectFrom = this.onBeforeTurnStart();
+    const currentPlayerId = this.setNextPlayerTurn();
+    const player = this.getMember(currentPlayerId);
+    if (!player) throw colorConsole().error("newTurn()=> couldn't find player");
+    // move to the new turn phase
+    this._phase = 1.1;
+    // announce it to the players
+    this._dispatch.announceNewTurn(this, currentPlayerId);
+    this.wait(3);
+    // allow the current player to select a word
+    player.setCanSelectWord();
+    // inform all the players of the word selection phase
+    this._dispatch.announcePlayerIsSelectingWord(this, player, this._wordsToSelectFrom);
+    // move to word selection phase
+    this._phase = 1.2;
+    // give the player some time to select after which select a word automatically
+    // if the player does not select a word after the waiting time has ran out, select a word automatically among the three random one in the words array
+    await this.await(10, () => this.playerHasSelectedWord(player, randomNumber(2)));
+    // NOTE: if the client choses a word before the selection time window runs out, the timer is kicked off from another method
+  }
+  /**
+   * Used when the player selects a word before the automatic selector is kicked off.
+   * This method will fire the timer.
+   * @param player the current player's object
+   * @param wordIndex the selected word index
+   */
+  public playerHasSelectedWord(player: Player, wordIndex: number): void {
+    this.stopWaiting();
+    // disallow any further word selection by the player
+    player.setCanSelectWord(false);
+    // set the word to guess based on the received word index
+    this._wordToGuess = this._wordsToSelectFrom[wordIndex];
+    // kick off the timer
+    this.startTimer();
+  }
   /**
    * Move to the next round. Ends the game if it was the last round when the method is called
    */
   protected nextRound(): void {
-    // if the game ended, dont go any further
+    // if the game ended, don't go any further
     if (this._gameEnded) return;
 
     console.log(`starting new round in room ${this.id}`);
     // if the timer is still going on stop it
     if (this._currentRound < this._settings.roundCount) {
       this._currentRound++;
-      this.newRound();
+      // if the game does not feature a turn system, move to a regular round directly
+      if (!this._hasTurns) this.newRound();
+      // otherwise, move to a round with turns
+      else this.newRoundWithTurns();
     } else {
       this.endGame();
     }
-
-    //
   }
-  /** To be imlemented later */
+  /** Move to the next turn. If the turn was the last upon calling this methods, move to the next round instead which will then end the game if it is the last as well*/
   private nextTurn(): void {
     if (this._gameEnded) return;
     console.log(`going to next turn in room ${this.id}`);
+
+    if (!this.isLastTurn) {
+      this.newTurn();
+    } else {
+      this.nextRound();
+    }
   }
+
   public endGame(): void {
     // if the game is not finished yet
     if (this._gameEnded) return console.warn("CANNOT END GAME. GAME ALREADY FINISHED");
@@ -404,8 +515,8 @@ export abstract class Room {
    */
   protected startTimer(): Promise<void> {
     return new Promise((resolve) => {
-      // set the "round ongoibn"
-      this._roundPhase = 2;
+      // set the "round ongoing"
+      this._phase = 2;
       this._timerStartedAt = Date.now();
       this._dispatch.timerStarted(this);
       this._timer = setTimeout(() => {
@@ -428,8 +539,8 @@ export abstract class Room {
     this._correctAnswerCount++;
     return score;
   }
-  /** Reset the round score for all the players in the room. Should be used at the end of the round. */
-  public resetRoundScores(): void {
+  /** Reset the score for all the players in the room. Should be used at the end of the round/turn. */
+  public resetPlayersScores(): void {
     this._members.forEach((player) => {
       player.resetRoundScore();
     });
@@ -443,25 +554,37 @@ export abstract class Room {
     this.stopTimer();
   }
 
-  /**
-   * Resets the state of the round.
-   * - Reset player has found correct answer state used to send messages for only players that have found the answer
-   * - Reset the score substractor used to calculate the sscore for each player who answers correctly
-   * - Reset the round scores of the player that are logged to inform the players the score they earned
-   * - Reset the correct answer counter needed to tell whether to stop the round if all players have answered before the time ends
-   * - Rest the round phase back to the first one (default one)
-   *
-   */
-  private resetRoundState(): void {
+  private resetSharedState(): void {
     this.resetAllPlayerHasAnswered();
     this.resetScoreSubtractor();
-    this.resetRoundScores();
+    this.resetPlayersScores();
     // reset the number of correct answer found in the round that is used to stop the round
     // in case all the players have found correct answer
     this._correctAnswerCount = 0;
-    // reset round phase back to its default
-    this._roundPhase = 1;
   }
+  /**
+   * Resets the state of the round.
+   * - Reset player has found correct answer state used to send messages for only players that have found the answer
+   * - Reset the score subtractor used to calculate the score for each player who answers correctly
+   * - Reset the round scores of the player that are logged to inform the players the score they earned
+   * - Reset the correct answer counter needed to tell whether to stop the round if all players have answered before the time ends
+   * - Reset the round phase back to the first one (default one)
+   * - Reset the currentPlayerIndex form games that feature turn system
+   */
+  private resetRoundState(): void {
+    this.resetSharedState();
+    // reset round phase back to its default
+    this._phase = 1;
+    // reset the current player index to move back to the first player
+    if (this._hasTurns) this._currentPlayerIndex = null;
+  }
+
+  private resetTurnState(): void {
+    this.resetSharedState();
+    this._phase = 1.1;
+    this._wordsToSelectFrom = [];
+  }
+
   /**
    * Stops the timer. Reset all the round state as well
    * @param endGame prevent going to the next when stopping the timer
@@ -473,10 +596,17 @@ export abstract class Room {
     if (this._timer) clearTimeout(this._timer);
     // nullify the timer
     this._timer = null;
-    // execute the onROundEnd lifecycle after finishing the timer
-    if (!endGame) this.onRoundEnd();
-    // reset the state of players that have found the answer
-    // this.resetRoundState();
+    // # ADJUSTMENTS FOR THE TURN SYSTEM
+    // ? If the game is turn based then move to the next turn instead of the round at the end, until all players have played their turn
+
+    // execute the onRoundEnd lifecycle after finishing the timer
+    if (!endGame) {
+      if (this._hasTurns /** && !this.isLastTurn*/) {
+        this.onTurnEnd();
+      } else {
+        this.onRoundEnd();
+      }
+    }
   }
 
   /** Reset the "player has found the answer" state to false for all the players that have found the answer. */
@@ -492,7 +622,19 @@ export abstract class Room {
     this._scoreSubtractor = 0;
   }
 
-  /** Allow players in this room to send messages/answers. Should be run at the begenning of the game*/
+  /**
+   * Handle the hint reception event
+   * @param player the player who sent the hint
+   * @param hint the hint contents
+   */
+  hintReceived(player: Player, hint: string): void {
+    // if the hint is the same as the word to guess, don't forward it
+    if (hint == this.wordToGuess) return;
+    this.setHintWord(hint);
+    this._dispatch.sendHint(player, this, hint);
+  }
+
+  /** Allow players in this room to send messages/answers. Should be run at the beginning of the game*/
   allowAnswers(): void {
     this._members.forEach((player) => {
       if (!player.canSendMessages) player.setCanSendMessage();
@@ -508,7 +650,7 @@ export abstract class Room {
 
   /**
    *
-   * ROUND LIFECYCLES
+   * ROUND LifeCycles
    *
    */
 
@@ -516,29 +658,60 @@ export abstract class Room {
    * First round lifecycle to be fired when moving to a new round
    */
   protected abstract onBeforeRoundStart(): Promise<string>;
+
+  protected abstract onBeforeTurnStart(): string[];
   /**
    * Round Lifecycle fired after after timeBeforeStartTimer has resolved and at the beginning of the timer
    * - Should contain game/round logic
    */
-  protected abstract onRoundStart(): void;
+  // protected abstract onRoundStart(): void;
   /**
-   * Check the answer of the player
+   * Check the answer of the player.
    * @resolve Resolves to a number.
-   * - 0 = player input is acceptable but uncorrect.
+   * - 0 = player input is acceptable but incorrect (should be treated as a regular chat message).
    * - 1 = player input is acceptable and is correct.
    * - 2 = player has already find the answer and keeps sending more messages
    * @reject The promise rejects when the user input in unacceptable/unexpected
    */
-  public abstract checkAnswer(player: Player, answer: string): Promise<number>;
+  public checkAnswer(player: Player, answer: string): Promise<number> {
+    return new Promise((resolve, reject) => {
+      // if the word to guess is not set yet
+      if (!this.wordToGuess) return reject();
+      // if the player has already found the answer and sends more messages while the round is still ongoing
+      if (player.hasAnswered) return resolve(2);
+      // if the word to guess length is not similar to the client answer
+      if (this.wordToGuess.length === answer.length) {
+        // if the answer is correct
+        if (this.wordToGuess == answer.toLocaleLowerCase()) {
+          // set the player as having found the correct answer
+          // TODO reset playerHasFoundAnswer on round end
+          resolve(1);
+        } else resolve(0); // incorrect answer/ regular chat message
+      } else {
+        // player answer is incorrect
+        resolve(0);
+      }
+    });
+    //
+  }
+
   /**
    * Last round lifecycle. Fired after the time has ran out or when the timer is manually stopped
    */
   private async onRoundEnd(): Promise<void> {
     //
-    this._roundPhase = 3;
+    this._phase = 4;
     this._dispatch.announceRoundScores(this);
-    await this.wait(5);
+    await this.wait(4);
     this.nextRound();
+  }
+
+  private async onTurnEnd(): Promise<void> {
+    //
+    this._phase = 3;
+    this._dispatch.announceTurnScores(this);
+    await this.wait(4);
+    this.nextTurn();
   }
   /**
    * Time to wait between announcing the round and starting the timer.
