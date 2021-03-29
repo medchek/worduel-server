@@ -1,5 +1,5 @@
 import { randomNumber } from "../core/utils";
-
+// DEVONLY - To be replaced with a real database
 export const wordList = [
   // easy
   [
@@ -127,4 +127,16 @@ export function getRandomWord(difficultyId: number): string {
   }
   const words = wordList[difficultyId - 1]; // id - 1 = index
   return words[randomNumber(words.length - 1)];
+}
+/**
+ * Returns an array containing 3 random words based on the difficultyId
+ * @param difficultyId the difficulty id (1 = easy, 2 = medium, 3 = hard, 4 = mixed)
+ * @returns an array of string contain 3 random words from the wordList
+ */
+export function getRandomWordSelection(difficultyId: number): string[] {
+  const words = [];
+  for (let n = 0; n < 3; n++) {
+    words.push(getRandomWord(difficultyId));
+  }
+  return words;
 }
