@@ -73,40 +73,40 @@ export class EventListener extends Kernel {
           case "setSettings":
             this.onSetSettings(player, room, params)
               .then(() => resolve())
-              .catch(() => reject());
+              .catch((err) => reject(err));
             break;
           case "start":
             this.onStartGame(player, room)
               .then(() => resolve())
-              .catch(() => reject());
+              .catch((err) => reject(err));
             break;
           case "answer":
             if (data.answer) {
               this.onAnswer(player, room, data.answer)
                 .then(() => resolve())
                 .catch(() => reject());
-            } else reject();
+            } else reject("expected answer data: Not received");
             break;
           case "wordSelected":
-            if (data.idx) {
+            if (typeof data.idx === "number" && data.idx >= 0 && data.idx <= 2) {
               this.onWordSelect(player, room, data.idx)
                 .then(() => resolve())
                 .catch(() => reject());
-            } else reject();
+            } else reject("expected idx data: Not received");
             break;
           case "hint":
             if (data.hint) {
               this.onHint(player, room, data.hint)
                 .then(() => resolve())
                 .catch(() => reject());
-            } else reject();
+            } else reject("expected hint data: Not received");
             break;
           default:
             reject("invalid settings event");
             break;
         }
       } else {
-        reject();
+        reject("Missing event property");
       }
     });
     //
@@ -226,7 +226,11 @@ export class EventListener extends Kernel {
         room.playerHasSelectedWord(player, wordIndex);
         resolve();
       } else {
-        reject();
+        // DEVONLY check for selectedWord content and expectations
+        console.log(
+          `[DEBUG] => isTurn=${player.isTurn} (expects true) | canSelect=${player.canSelectWord} (expects true) | phase=${room.phase} (expects 1.2) | selectedIndex=${wordIndex} (expects 0, 1, or 2)`
+        );
+        reject("onWordSelect => failed checks");
         player.socket.close();
       }
     });
@@ -243,7 +247,7 @@ export class EventListener extends Kernel {
       await this.hintLimiter.consume(player.ip, 1);
       return new Promise((resolve, reject) => {
         if (room.hasGameStarted && room.hasTurns && room.phase === 2 && player.isTurn) {
-          if (hint.length > 0 && hint.length <= 150) {
+          if (hint.length > 0 && hint.length <= 100) {
             room.hintReceived(player, escape(hint));
             resolve();
           } else reject();
