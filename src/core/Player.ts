@@ -128,6 +128,13 @@ export class Player {
     this._roundScore = score;
     this._score += score;
   }
+  /**
+   * set the player as the player of the current turn
+   * @param value defaults to true
+   */
+  public setIsTurn(value = true): void {
+    this._isTurn = value;
+  }
 
   public setCanSelectWord(value = true): void {
     this._expectSelectWord = value;
