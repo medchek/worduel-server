@@ -308,13 +308,19 @@ export abstract class Room {
   protected setNextPlayerTurn(): string {
     if (!this._hasTurns) throw new Error("This game does not feature a turn system");
     const members = Array.from(this._members);
-    if (!this._currentPlayerIndex) {
+
+    colorConsole().debug("MOVING TO NEXT PLAYER");
+
+    if (this._currentPlayerIndex === null) {
       this._currentPlayerIndex = 0;
-      // return the first player, with the item at 0 index being the playerId
+      // item at the 1 index is the player object
+      members[this._currentPlayerIndex][1].setIsTurn();
+      // return the first player, with the item at 0 index being the playerId (the map key)
       return members[0][0];
     } else {
       // otherwise, move to the next player
       this._currentPlayerIndex++;
+      members[this._currentPlayerIndex][1].setIsTurn();
       // and return his id
       return members[this._currentPlayerIndex][0];
     }
@@ -420,6 +426,7 @@ export abstract class Room {
   /** Runs a complete round lifecycle including turns for each player */
   private async newRoundWithTurns(): Promise<void> {
     if (this._gameEnded) return;
+    // reset the round state when moving to a new one
     if (this._currentRound > 1) this.resetRoundState();
     // announce a new round
     this._dispatch.announceNewRound(this);
@@ -436,12 +443,13 @@ export abstract class Room {
     this._wordsToSelectFrom = this.onBeforeTurnStart();
     const currentPlayerId = this.setNextPlayerTurn();
     const player = this.getMember(currentPlayerId);
-    if (!player) throw colorConsole().error("newTurn()=> couldn't find player");
+    colorConsole().debug(`[newTurn] => current turn's player is ${player?.username}`);
+    if (!player) throw colorConsole().error("newTurn() => couldn't find next player");
     // move to the new turn phase
     this._phase = 1.1;
     // announce it to the players
     this._dispatch.announceNewTurn(this, currentPlayerId);
-    this.wait(3);
+    await this.wait(3);
     // allow the current player to select a word
     player.setCanSelectWord();
     // inform all the players of the word selection phase
@@ -465,7 +473,9 @@ export abstract class Room {
     player.setCanSelectWord(false);
     // set the word to guess based on the received word index
     this._wordToGuess = this._wordsToSelectFrom[wordIndex];
-    // kick off the timer
+    // dispatch the word length as a hint to other players
+    this._dispatch.sendWordToGuessLength(this, player.id); // kick off the timer
+    //
     this.startTimer();
   }
   /**
