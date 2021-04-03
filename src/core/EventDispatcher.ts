@@ -1,3 +1,4 @@
+import { colorConsole } from "tracer";
 import WebSocket from "ws";
 import { RoomSettings } from "./../config/roomSettings";
 import { Player, PublicMember } from "./Player";
@@ -18,7 +19,7 @@ interface Message {
   sval?: number | string;
   newLeaderId?: string;
   word?: string; // the hint word
-  worldLen?: number; // hint word length for games that should no reveal the whole word letters
+  wordLen?: number; // hint word length for games that should no reveal the whole word letters
   wordList?: string[]; // word to guess that the current player can chose from
   scores?: { [playerName: string]: number }; // score announcer data
   reason?: string; // error reason
@@ -254,6 +255,8 @@ export class EventDispatcher {
    * @param word the word that helps the client to figure out the word to guess
    */
   public announceNewRound(room: Room, word?: string): void {
+    colorConsole().debug("[DEBUG]: Announcing new round");
+
     // only send the word if the room does not feature a turn system
     // in which case the hint word is sent through the announceTurn event since a word must be sent for each turn
     const data: Message = {
@@ -267,12 +270,13 @@ export class EventDispatcher {
   /**
    * Event to inform all the players in the room of a new player's turn
    * @param room the game room object
-   * @param playerName the username of the player who is to play currently
+   * @param playerId the username of the player who is to play currently
    */
-  public announceNewTurn(room: Room, playerName: string): void {
+  public announceNewTurn(room: Room, playerId: string): void {
+    colorConsole().debug("[DEBUG]: Announcing new turn");
     this.toAll(room, {
       event: "newTurn",
-      playerName,
+      playerId,
     });
   }
   /**
@@ -287,10 +291,12 @@ export class EventDispatcher {
     player: Player,
     wordList: string[]
   ): void {
+    // DEVONLY check if this methods gets sent at the right time
+    colorConsole().debug("[DEBUG]: Announcing player is selecting a word");
     // send a first message to the players currently not playing informing them that the current player is picking up a word
     this.toAllButOne(room, player.id, {
       event: "wordSelect",
-      playerName: player.username,
+      // playerName: player.username, // ? this is not needed since it was sent in the announceNewTurn event
     });
     // send a message to the current playing player the word list from which to select a word to guess from
     this.toPlayer(player, {
@@ -327,10 +333,29 @@ export class EventDispatcher {
     });
   }
 
+  /**
+   * Event to dispatch the hint to other player in the room
+   * @param player the player object who sent the hint
+   * @param room the room object
+   * @param hint the hint contents
+   */
   public sendHint(player: Player, room: Room, hint: string): void {
     this.toAllButOne(room, player.id, {
       event: "hint",
       hint,
+    });
+  }
+
+  /**
+   * Event to send the word-to-guess length to all the players but the currently playing
+   * @param room the room object
+   * @param playerId the currenty player id whose turn is currently active
+   */
+  public sendWordToGuessLength(room: Room, playerId: string): void {
+    if (!room.wordToGuess) throw new Error("sendWordToGuessLength => word not set yet");
+    this.toAllButOne(room, playerId, {
+      event: "wordLen",
+      wordLen: room.wordToGuess.length,
     });
   }
 
