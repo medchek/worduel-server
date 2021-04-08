@@ -19,6 +19,8 @@ export interface PublicMembers {
   [id: string]: PublicMember;
 }
 
+type PlayerId = string;
+
 export abstract class Room {
   protected _dispatch = new EventDispatcher();
 
@@ -160,13 +162,29 @@ export abstract class Room {
     } else return false;
   }
 
+  /**
+   * Returns the currently playing player object in a game that features turns
+   */
+  get turnCurrentPlayer(): Player | null {
+    if (!this._hasTurns) throw new Error("This game does not feature a turn system");
+    if (this._currentPlayerIndex === null) return null;
+    const party = Array.from(this._members);
+    return party[this._currentPlayerIndex][1];
+  }
+
   get isLastRound(): boolean {
     return this._currentRound == this._settings.roundCount;
   }
 
   /** returns true if all players have found the answer, false otherwise */
   get hasAllAnswered(): boolean {
-    return this._correctAnswerCount == this.memberCount;
+    // if the game has features turns, the number of correct answer should be take into account the currently player memeber
+    // who does not answer
+    if (this.hasTurns) {
+      return this._correctAnswerCount == this.memberCount - 1;
+    } else {
+      return this._correctAnswerCount == this.memberCount;
+    }
   }
 
   /** Get the data of the members of the room that are intended to be sent to the client */
@@ -185,7 +203,7 @@ export abstract class Room {
     );
   }
 
-  /** Return the score obtained by all the players during a round */
+  /** Return the score obtained by all the players during a round/turn */
   get playersRoundScore(): { [playerName: string]: number } {
     const playersScore: { [playerName: string]: number } = {};
     this._members.forEach((player) => {
@@ -305,7 +323,7 @@ export abstract class Room {
    * Sets the next player to play and return the id of said player
    * @returns player's id for the current turn
    */
-  protected setNextPlayerTurn(): string {
+  protected setNextPlayerTurn(): PlayerId {
     if (!this._hasTurns) throw new Error("This game does not feature a turn system");
     const members = Array.from(this._members);
 
@@ -490,9 +508,12 @@ export abstract class Room {
     if (this._currentRound < this._settings.roundCount) {
       this._currentRound++;
       // if the game does not feature a turn system, move to a regular round directly
-      if (!this._hasTurns) this.newRound();
-      // otherwise, move to a round with turns
-      else this.newRoundWithTurns();
+      if (!this._hasTurns) {
+        this.newRound();
+      } else {
+        // otherwise, move to a round with turns
+        this.newRoundWithTurns();
+      }
     } else {
       this.endGame();
     }
@@ -501,7 +522,6 @@ export abstract class Room {
   private nextTurn(): void {
     if (this._gameEnded) return;
     console.log(`going to next turn in room ${this.id}`);
-
     if (!this.isLastTurn) {
       this.newTurn();
     } else {
@@ -555,12 +575,31 @@ export abstract class Room {
       player.resetRoundScore();
     });
   }
+  /**
+   * Calculate the score of the currently playing pary member. Should be called on every turn end.
+   *
+   * Since the current player does not answer the question, the score obtained should be counted based on how many other players have answered.
+   * The player should get a near-full score if everyone answered, and nothing if no one did.
+   */
+  public calculateTurnCurrentPlayerScore(): number {
+    if (!this.hasTurns) throw new Error("game does not support a turn system");
+    // get the score percentage based on the party length
+    // eg: if 4 players out of 5 answered, the current player should obtain 80% of the initial base score
+    const scoredPercentage = (this._correctAnswerCount * 100) / this.memberCount;
+    // remove a small penalty to reward players who answered more
+    const finalScore = (this._baseScore * scoredPercentage) / 100 - this.memberCount;
+    return finalScore > 0 ? finalScore : 0;
+  }
 
   /**
    * Manually stop the timer and end the round.
    * Intended to be used when all players have correctly answered before the round time runs out
    */
   public endRound(): void {
+    this.stopTimer();
+  }
+
+  public endTurn(): void {
     this.stopTimer();
   }
 
@@ -597,7 +636,7 @@ export abstract class Room {
 
   /**
    * Stops the timer. Reset all the round state as well
-   * @param endGame prevent going to the next when stopping the timer
+   * @param endGame prevent going to the next turn/round when stopping the timer
    */
   protected stopTimer(endGame = false): void {
     if (!this._timer) return;
@@ -670,10 +709,7 @@ export abstract class Room {
   protected abstract onBeforeRoundStart(): Promise<string>;
 
   protected abstract onBeforeTurnStart(): string[];
-  /**
-   * Round Lifecycle fired after after timeBeforeStartTimer has resolved and at the beginning of the timer
-   * - Should contain game/round logic
-   */
+
   // protected abstract onRoundStart(): void;
   /**
    * Check the answer of the player.
@@ -686,7 +722,7 @@ export abstract class Room {
   public checkAnswer(player: Player, answer: string): Promise<number> {
     return new Promise((resolve, reject) => {
       // if the word to guess is not set yet
-      if (!this.wordToGuess) return reject();
+      if (!this.wordToGuess) return reject("Error: wordToGuess is not set");
       // if the player has already found the answer and sends more messages while the round is still ongoing
       if (player.hasAnswered) return resolve(2);
       // if the word to guess length is not similar to the client answer
@@ -717,13 +753,18 @@ export abstract class Room {
   }
 
   private async onTurnEnd(): Promise<void> {
-    //
+    if (this._gameEnded) return;
+    // calculate the score of the player whose turn was in that turn
+    if (this.turnCurrentPlayer) {
+      this.turnCurrentPlayer.addScore(this.calculateTurnCurrentPlayerScore());
+      // remove the turn state in preparation for the next turn
+      this.turnCurrentPlayer.setIsTurn(false);
+    }
+
+    // go the the turn ended phase
     this._phase = 3;
     this._dispatch.announceTurnScores(this);
     await this.wait(4);
     this.nextTurn();
   }
-  /**
-   * Time to wait between announcing the round and starting the timer.
-   */
 }
