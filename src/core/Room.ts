@@ -767,4 +767,17 @@ export abstract class Room {
     await this.wait(4);
     this.nextTurn();
   }
+  /**
+   * Fired when a player is disconnected from the room
+   * @param wasTurn whether it was the player's turn or not
+   */
+  public onPlayerDisconnected(wasTurn: boolean): void {
+    // if a player whose turn is currently ongoing, move to the next turn
+    if (this._hasTurns) {
+      // if the disconnected player was the one playing in the current turn, move to the next turn
+      if (wasTurn) {
+        this.onTurnEnd();
+      }
+    }
+  }
 }

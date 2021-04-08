@@ -156,7 +156,7 @@ export class RoomManager extends Kernel {
       if (targetRoom.hasGameStarted) targetRoom.endGame();
       // remove the room
       removed = this.roomList.delete(roomId);
-      console.log(`room "${targetRoom.id}" deleted = ${removed}`);
+      console.log(`room "${targetRoom.id}" deleted`);
     }
     return removed;
   }
@@ -185,6 +185,7 @@ export class RoomManager extends Kernel {
           }
           // delete the player from the room members
           room.members.delete(player.id);
+          room.onPlayerDisconnected(player.isTurn);
         }
         // delete the player from the playerList as well
         this.playerList.removePlayer({ id: player.id, terminateSocket: true });
