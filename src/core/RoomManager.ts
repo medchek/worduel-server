@@ -179,6 +179,7 @@ export class RoomManager extends Kernel {
           //if the disconnected player was the creator of the room, pass the leadership to the next member of the room
           if (room.memberCount > 1 && player.isLeader) {
             const newLeader = room.setNewRoomLeader();
+            newLeader.setCanSendMessage();
             // in case the room creator disconnected, send the new room leader id along with the response to the client
             newLeaderId = newLeader.id;
             // console.log("after=> ", newLeader);
