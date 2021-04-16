@@ -13,7 +13,8 @@ import {
 import Joi from "joi";
 import { Room } from "./Room";
 
-import escape from "validator/lib/escape";
+// import escape from "validator/lib/escape";
+import xss from "xss";
 
 interface EventListenerConstructor {
   roomList: RoomManager;
@@ -37,12 +38,12 @@ export class EventListener extends Kernel {
   private chatLimiter = new RateLimiterMemory({
     points: 9,
     duration: 5,
-    blockDuration: 10,
+    blockDuration: 5,
   });
 
   private hintLimiter = new RateLimiterMemory({
     points: 1,
-    duration: 2,
+    duration: 1,
   });
 
   constructor(eventListenerConstructor: EventListenerConstructor) {
@@ -60,12 +61,12 @@ export class EventListener extends Kernel {
       if (Object.prototype.hasOwnProperty.call(data, "event")) {
         const roomId = player.joinedRoomId;
         if (!roomId) {
-          reject;
+          reject();
           throw new Error("Player has not joined a room ");
         }
         const room = this.roomList.getRoom(roomId);
         if (!room) {
-          reject;
+          reject("could not find the requested room");
           throw new Error("Room not found");
         }
         const { event, ...params } = data;
@@ -84,7 +85,7 @@ export class EventListener extends Kernel {
             if (data.answer) {
               this.onAnswer(player, room, data.answer)
                 .then(() => resolve())
-                .catch(() => reject());
+                .catch((err) => reject(err));
             } else reject("expected answer data: Not received");
             break;
           case "wordSelected":
@@ -248,7 +249,13 @@ export class EventListener extends Kernel {
       return new Promise((resolve, reject) => {
         if (room.hasGameStarted && room.hasTurns && room.phase === 2 && player.isTurn) {
           if (hint.length > 0 && hint.length <= 100) {
-            room.hintReceived(player, escape(hint));
+            // room.hintReceived(player, escape(hint));
+            room.hintReceived(
+              player,
+              xss(hint, {
+                stripIgnoreTag: true,
+              })
+            );
             resolve();
           } else reject();
           //
@@ -299,8 +306,12 @@ export class EventListener extends Kernel {
                 // TODO check if all players have found the answer when a player answers correctly. If so, end the current round and move to the next
                 // if all players have answered
                 if (room.hasAllAnswered) {
-                  // end the round
-                  room.endRound();
+                  // end the round/turn
+                  if (room.hasTurns) {
+                    room.endTurn();
+                  } else {
+                    room.endRound();
+                  }
                 }
               }
               // dispatch the message
@@ -315,7 +326,8 @@ export class EventListener extends Kernel {
       // if the rate limiter kicks in
       this.eventDispatcher.slowDown(player);
       throw new Error(
-        `${player.username}:${player.ip} is sending too many messages in the chat`
+        `${err}
+        ${player.username}:${player.ip} is sending too many messages in the chat`
       );
     }
   }

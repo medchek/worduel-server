@@ -270,10 +270,10 @@ export class EventDispatcher {
   /**
    * Event to inform all the players in the room of a new player's turn
    * @param room the game room object
-   * @param playerId the username of the player who is to play currently
+   * @param playerId the id of the player who is to play currently
    */
   public announceNewTurn(room: Room, playerId: string): void {
-    colorConsole().debug("[DEBUG]: Announcing new turn");
+    colorConsole().debug(`[DEBUG]: Announcing new turn. current playerid is ${playerId}`);
     this.toAll(room, {
       event: "newTurn",
       playerId,
@@ -292,7 +292,9 @@ export class EventDispatcher {
     wordList: string[]
   ): void {
     // DEVONLY check if this methods gets sent at the right time
-    colorConsole().debug("[DEBUG]: Announcing player is selecting a word");
+    colorConsole().debug(
+      `[DEBUG]: Announcing player [${player.username}] is selecting a word`
+    );
     // send a first message to the players currently not playing informing them that the current player is picking up a word
     this.toAllButOne(room, player.id, {
       event: "wordSelect",
