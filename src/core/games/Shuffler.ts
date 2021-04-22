@@ -1,4 +1,3 @@
-import { Player } from "./../Player";
 import { getRandomWord } from "../../config/wordList";
 import { Room, RoomOptions } from "./../Room";
 import arrayShuffle from "array-shuffle";
@@ -21,7 +20,7 @@ export class Shuffler extends Room {
       this.setWordToGuess(wordToGuess);
       // shuffle the word
       this._shuffledWord = this.shuffleWord(wordToGuess);
-      this.setHintWord(this._shuffledWord);
+      this.setHint(this._shuffledWord);
       // must resolve to be able to move to the next lifecycle
       resolve(this._shuffledWord);
     });
