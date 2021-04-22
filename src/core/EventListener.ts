@@ -283,7 +283,7 @@ export class EventListener extends Kernel {
             throw new Error("Unauthorized action: currently playing client sent answer");
           // only if the game has started
           room
-            .checkAnswer(player, answer.trim())
+            .checkAnswer(player, answer.trim().toLowerCase())
             .then((reason) => {
               // reason === 0 => regular message
               // reason === 1 => has just found correct answer !
