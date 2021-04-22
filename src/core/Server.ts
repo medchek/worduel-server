@@ -133,8 +133,8 @@ export class GameServer extends Kernel {
       // Rate limiting
       try {
         await this.wsGlobalRateLimit.consume(
-          clientIp, // this will be verified to never be undefined in the verifyClientHeaders, hence the type cast.
-          1 // consume 10 points per request, which equates to 6 attempts per minute
+          clientIp,
+          2 // consume 10 points per request, which equates to 6 attempts per minute
         );
         // verifying the connection url
         this.verifyClientUrl(req)
@@ -252,7 +252,11 @@ export class GameServer extends Kernel {
         }
         colorConsole().log(`Message received by ${player.username}:${player.id}`); // checks if the message event is working
         // any suspicious data content should terminate the socket connection
-
+        // DEVONLY remove message content display
+        colorConsole().info(
+          `[DEBUG] Message content by [${player.username}]:`,
+          messageData
+        );
         // if the message is of type string and its length does not exceed 255
         if (
           typeof messageData === "string" &&
@@ -396,16 +400,16 @@ export class GameServer extends Kernel {
   // should be fired before allowing the connection
   private verifyClientHeaders(req: IncomingMessage): boolean {
     if (!process.env.CLIENT_ORIGIN) throw new Error("CLIENT_ORIGIN env not set!");
-
-    console.log(
-      "[TEST HEADERS] printing request data",
-      "ip = ",
-      req.socket.remoteAddress,
-      ", port = ",
-      req.socket.remotePort,
-      "FULL REQUEST => ",
-      req
-    );
+    // DEVONLY LOG HEADERS
+    // console.log(
+    //   "[TEST HEADERS] printing request data",
+    //   "ip = ",
+    //   req.socket.remoteAddress,
+    //   ", port = ",
+    //   req.socket.remotePort,
+    //   "FULL REQUEST => ",
+    //   req
+    // );
 
     const allowedOrigins = [
       // "chrome-extension://cbcbkhdmedgianpaifchdaddpnmgnknn", // temp for dev
