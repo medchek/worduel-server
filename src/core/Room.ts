@@ -18,6 +18,11 @@ export interface RoomOptions {
 export interface PublicMembers {
   [id: string]: PublicMember;
 }
+// used with the riddle game in the onBeforeRoundStart promise type
+export interface Riddle {
+  riddle: string;
+  answerLen: number;
+}
 
 type PlayerId = string;
 
@@ -49,14 +54,15 @@ export abstract class Room {
   protected _hasStarted = false;
   protected _gameEnded = false;
   protected _currentPlayerIndex: number | null = null;
+  protected _currentPlayerId: PlayerId | null = null;
   protected _currentTurn = 0;
   protected _currentRound = 0;
   protected _isLobby = true;
-  protected _wordToGuess: string | undefined;
+  protected _wordToGuess: string | string[] | undefined;
   /** The generated words that the current player can select a word from to be guessed by the other players in the room */
   protected _wordsToSelectFrom: string[] = [];
-  /** Word used to help the player guess the wordToGuess */
-  protected _hintWord: string | undefined;
+  /** Anything that can help the player guesss the wordToGuess. (shuffled word/riddle/more if needed)  */
+  protected _hint: string | undefined;
 
   // timing
   protected _timer: NodeJS.Timeout | null = null;
@@ -128,7 +134,7 @@ export abstract class Room {
     return this._hasStarted;
   }
 
-  get wordToGuess(): string | undefined {
+  get wordToGuess(): string | string[] | undefined {
     return this._wordToGuess;
   }
 
@@ -137,7 +143,7 @@ export abstract class Room {
   }
 
   get hintWord(): string | undefined {
-    return this._hintWord;
+    return this._hint;
   }
 
   get hasTurns(): boolean {
@@ -155,9 +161,15 @@ export abstract class Room {
     return this._phase;
   }
 
+  // get isLastTurn(): boolean {
+  //   if (!this._currentPlayerIndex) return false;
+  //   if (this._currentPlayerIndex + 1 >= this.memberCount) {
+  //     return true;
+  //   } else return false;
+  // }
   get isLastTurn(): boolean {
-    if (!this._currentPlayerIndex) return false;
-    if (this._currentPlayerIndex + 1 === this.memberCount) {
+    if (!this._currentPlayerId) return false;
+    if (this.getNextPlayer !== null) {
       return true;
     } else return false;
   }
@@ -170,6 +182,30 @@ export abstract class Room {
     if (this._currentPlayerIndex === null) return null;
     const party = Array.from(this._members);
     return party[this._currentPlayerIndex][1];
+  }
+
+  /**
+   * Get the next member that is suppose to play in the next turn
+   */
+  get getNextPlayer(): Player | null {
+    if (!this._hasTurns) throw new Error("Game does not feature a turn system");
+    // get the ordered ids of the players
+    const membersIds = Array.from(this._members.keys());
+    if (this._currentPlayerId === null) {
+      // if it's the first turn, then return the first player
+      return this._members.get(membersIds[0]) || null;
+    } else {
+      // else, get the previous turn player
+      const lastTurnPlayerIndex = membersIds.indexOf(this._currentPlayerId);
+      // if it was found within the membersIds array
+      if (lastTurnPlayerIndex >= 0) {
+        // return the next player if found, null otherwise
+        return this._members.get(membersIds[lastTurnPlayerIndex + 1]) || null;
+      } else {
+        // otherwise
+        return null;
+      }
+    }
   }
 
   get isLastRound(): boolean {
@@ -251,12 +287,12 @@ export abstract class Room {
     this._isLobby = false;
   }
 
-  protected setWordToGuess(word: string): void {
+  protected setWordToGuess(word: string | string[]): void {
     this._wordToGuess = word;
   }
 
-  protected setHintWord(word: string): void {
-    this._hintWord = word;
+  protected setHint(hint: string): void {
+    this._hint = hint;
   }
 
   /**
@@ -319,31 +355,28 @@ export abstract class Room {
     });
   }
 
-  /**
-   * Sets the next player to play and return the id of said player
-   * @returns player's id for the current turn
-   */
-  protected setNextPlayerTurn(): PlayerId {
-    if (!this._hasTurns) throw new Error("This game does not feature a turn system");
-    const members = Array.from(this._members);
-
-    colorConsole().debug("MOVING TO NEXT PLAYER");
-
-    if (this._currentPlayerIndex === null) {
-      this._currentPlayerIndex = 0;
-      // item at the 1 index is the player object
-      members[this._currentPlayerIndex][1].setIsTurn();
-      // return the first player, with the item at 0 index being the playerId (the map key)
-      return members[0][0];
-    } else {
-      // otherwise, move to the next player
-      this._currentPlayerIndex++;
-      members[this._currentPlayerIndex][1].setIsTurn();
-      // and return his id
-      return members[this._currentPlayerIndex][0];
+  /*
+     protected setNextPlayerTurn(): PlayerId {
+      if (!this._hasTurns) throw new Error("This game does not feature a turn system");
+      const members = Array.from(this._members);
+  
+      colorConsole().debug("MOVING TO NEXT PLAYER");
+  
+      if (this._currentPlayerIndex === null) {
+        this._currentPlayerIndex = 0;
+        // item at the 1 index is the player object
+        members[this._currentPlayerIndex][1].setIsTurn();
+        // return the first player, with the item at 0 index being the playerId (the map key)
+        return members[0][0];
+      } else {
+        // otherwise, move to the next player
+        this._currentPlayerIndex++;
+        members[this._currentPlayerIndex][1].setIsTurn();
+        // and return his id
+        return members[this._currentPlayerIndex][0];
+      }
     }
-  }
-
+    */
   /**
    * SECTION GAME & ROUND MANAGEMENT
    */
@@ -372,16 +405,6 @@ export abstract class Room {
       //-----------
     }, 1000);
     //--------------
-  }
-  /**
-   * Time to wait between announcing the round and kicking off the timer
-   */
-  private timeBeforeStartTimer(): Promise<void> {
-    return new Promise((resolve) => {
-      setTimeout(() => {
-        resolve();
-      }, this._timeBeforeTimerStart * 1000);
-    });
   }
 
   /**
@@ -430,9 +453,9 @@ export abstract class Room {
     // stops the timer if it's started
     this.stopTimer();
     // logic to run before announcing the round
-    const word = await this.onBeforeRoundStart();
+    const wordOrRiddle = await this.onBeforeRoundStart();
     // announce the beginning of a new round
-    this._dispatch.announceNewRound(this, word);
+    this._dispatch.announceNewRound(this, wordOrRiddle);
     // wait for the time before firing the timer
     // await this.timeBeforeStartTimer();
     await this.wait(this._timeBeforeTimerStart);
@@ -444,39 +467,132 @@ export abstract class Room {
   /** Runs a complete round lifecycle including turns for each player */
   private async newRoundWithTurns(): Promise<void> {
     if (this._gameEnded) return;
+    this.resetRoundState();
+    console.log("newRoundWithTurns() => Starting a new round with turns");
     // reset the round state when moving to a new one
     if (this._currentRound > 1) this.resetRoundState();
     // announce a new round
     this._dispatch.announceNewRound(this);
     // wait before announcing the new turn
-    await this.wait(3);
+    await this.await(3);
     // wait for a full turn cycle
     await this.newTurn();
+  }
+
+  private shouldInterruptTurn(
+    previousState: Readonly<{
+      turnPlayerId: string | null;
+      round: number;
+    }>
+  ): boolean {
+    console.log(
+      "InterruptTurn() =>",
+      `forzenPlayerId=${previousState.turnPlayerId} | frozenTurnNumber=${previousState.round}`,
+      `currentPlayerId=${this._currentPlayerId} | currentRound=${this.currentRound}`
+    );
+    return (
+      this._currentRound !== previousState.round ||
+      this._currentPlayerId !== this._currentPlayerId
+    );
+  }
+
+  private interruptTurn(prevTurnId: number) {
+    return prevTurnId !== this._currentTurn;
+  }
+
+  /**
+   * Sets the next player to play and return the id of said player
+   * @returns player object who's playing the current turn
+   */
+  protected setCurrentTurnPlayer(): Player | null {
+    if (!this._hasTurns) throw new Error("This game does not feature a turn system");
+    colorConsole().debug("setCurrentTurnPlayer() is executing...");
+    if (this._currentPlayerId === null) {
+      console.log("setCurrentTurnPlayer: found null setting the topmost player");
+      const members = Array.from(this._members);
+      const firstPlayer = members[0][1];
+      this._currentPlayerId = firstPlayer.id;
+      // item at the 1 index is the player object
+      firstPlayer.setIsTurn();
+      // return the first player, with the item at 0 index being the playerId (the map key)
+      return firstPlayer;
+    } else {
+      // otherwise, move to the next player
+      if (this.getNextPlayer !== null) {
+        console.log(
+          `setCurrentTurnPlayer: found an Id setting the next player [${this.getNextPlayer}]`
+        );
+
+        const nextPlayer = this.getNextPlayer;
+        this._currentPlayerId = nextPlayer.id;
+        nextPlayer.setIsTurn();
+        return nextPlayer;
+      } else {
+        // else, there is no next player. Move to next round
+        return null;
+      }
+    }
   }
 
   /** Runs a complete turn cycle */
   private async newTurn(): Promise<void> {
     this.resetTurnState();
     this.stopTimer(); // stop the timer if it's still running
-    this._wordsToSelectFrom = this.onBeforeTurnStart();
-    const currentPlayerId = this.setNextPlayerTurn();
-    const player = this.getMember(currentPlayerId);
-    colorConsole().debug(`[newTurn] => current turn's player is ${player?.username}`);
-    if (!player) throw colorConsole().error("newTurn() => couldn't find next player");
-    // move to the new turn phase
-    this._phase = 1.1;
-    // announce it to the players
-    this._dispatch.announceNewTurn(this, currentPlayerId);
-    await this.wait(3);
-    // allow the current player to select a word
-    player.setCanSelectWord();
-    // inform all the players of the word selection phase
-    this._dispatch.announcePlayerIsSelectingWord(this, player, this._wordsToSelectFrom);
-    // move to word selection phase
-    this._phase = 1.2;
-    // give the player some time to select after which select a word automatically
-    // if the player does not select a word after the waiting time has ran out, select a word automatically among the three random one in the words array
-    await this.await(10, () => this.playerHasSelectedWord(player, randomNumber(2)));
+    // used as a turn identifier
+    this._currentTurn++;
+    const turnId = this._currentTurn;
+
+    const currentTurnPlayer = this.setCurrentTurnPlayer();
+    if (currentTurnPlayer !== null) {
+      //
+      // const turnState = Object.freeze({
+      //   turnPlayerId: this._currentPlayerId,
+      //   round: this._currentRound,
+      // });
+      //
+
+      // console.log("interrupt? ", this.shouldInterruptTurn(turnState));
+      colorConsole().debug(
+        `[newTurn()] => current player is ${currentTurnPlayer.username}`
+      );
+      if (this.interruptTurn(turnId)) return;
+      // move to the new turn phase
+      this._phase = 1.1;
+      // announce it to the players
+      this._dispatch.announceNewTurn(this, currentTurnPlayer.id);
+      await this.await(3);
+      if (this.interruptTurn(turnId)) return;
+      // allow the current player to select a word
+      currentTurnPlayer.setCanSelectWord();
+      this._wordsToSelectFrom = this.onBeforeTurnStart();
+
+      if (this.interruptTurn(turnId)) return;
+      // inform all the players of the word selection phase
+      this._dispatch.announcePlayerIsSelectingWord(
+        this,
+        currentTurnPlayer,
+        this._wordsToSelectFrom
+      );
+
+      // move to word selection phase
+      this._phase = 1.2;
+      if (this.interruptTurn(turnId)) return;
+
+      // give the player some time to select after which select a word automatically
+      // if the player does not select a word after the waiting time has ran out, select a word automatically among the three random one in the words array
+      await this.await(10, () => {
+        // console.log("interrupt? ", this.shouldInterruptTurn(turnState));
+        console.log(
+          `Room: ${this.id}`,
+          "automatically picked a new word after client not selecting one within 10 secs"
+        );
+        if (!this.interruptTurn(turnId)) {
+          this.playerHasSelectedWord(currentTurnPlayer, randomNumber(2));
+        }
+      });
+    } else {
+      this.nextRound();
+    }
     // NOTE: if the client choses a word before the selection time window runs out, the timer is kicked off from another method
   }
   /**
@@ -521,10 +637,11 @@ export abstract class Room {
   /** Move to the next turn. If the turn was the last upon calling this methods, move to the next round instead which will then end the game if it is the last as well*/
   private nextTurn(): void {
     if (this._gameEnded) return;
-    console.log(`going to next turn in room ${this.id}`);
     if (!this.isLastTurn) {
+      console.log(`nextTurn() => going to next turn in room ${this.id}`);
       this.newTurn();
     } else {
+      console.log(`nextTurn() => going to next round in room ${this.id}`);
       this.nextRound();
     }
   }
@@ -603,6 +720,14 @@ export abstract class Room {
     this.stopTimer();
   }
 
+  public abortTurn(): void {
+    this.stopWaiting();
+    this.stopTimer(true);
+    this.nextTurn();
+  }
+  /**
+   * Reset the state shared between rounds and turns
+   */
   private resetSharedState(): void {
     this.resetAllPlayerHasAnswered();
     this.resetScoreSubtractor();
@@ -625,7 +750,11 @@ export abstract class Room {
     // reset round phase back to its default
     this._phase = 1;
     // reset the current player index to move back to the first player
-    if (this._hasTurns) this._currentPlayerIndex = null;
+    if (this._hasTurns) {
+      this._currentPlayerId = null;
+      this._currentPlayerIndex = null;
+      this._currentTurn = 0;
+    }
   }
 
   private resetTurnState(): void {
@@ -636,9 +765,9 @@ export abstract class Room {
 
   /**
    * Stops the timer. Reset all the round state as well
-   * @param endGame prevent going to the next turn/round when stopping the timer
+   * @param preventNext prevent going to the next turn/round when stopping the timer, [typically used to end the game]
    */
-  protected stopTimer(endGame = false): void {
+  protected stopTimer(preventNext = false): void {
     if (!this._timer) return;
     // reset the value of timerStartedAt
     this._timerStartedAt = 0;
@@ -649,8 +778,8 @@ export abstract class Room {
     // ? If the game is turn based then move to the next turn instead of the round at the end, until all players have played their turn
 
     // execute the onRoundEnd lifecycle after finishing the timer
-    if (!endGame) {
-      if (this._hasTurns /** && !this.isLastTurn*/) {
+    if (!preventNext) {
+      if (this._hasTurns && !this.isLastTurn) {
         this.onTurnEnd();
       } else {
         this.onRoundEnd();
@@ -679,7 +808,7 @@ export abstract class Room {
   hintReceived(player: Player, hint: string): void {
     // if the hint is the same as the word to guess, don't forward it
     if (hint == this.wordToGuess) return;
-    this.setHintWord(hint);
+    this.setHint(hint);
     this._dispatch.sendHint(player, this, hint);
   }
 
@@ -706,7 +835,7 @@ export abstract class Room {
   /**
    * First round lifecycle to be fired when moving to a new round
    */
-  protected abstract onBeforeRoundStart(): Promise<string>;
+  protected abstract onBeforeRoundStart(): Promise<string | Riddle>;
 
   protected abstract onBeforeTurnStart(): string[];
 
@@ -728,7 +857,7 @@ export abstract class Room {
       // if the word to guess length is not similar to the client answer
       if (this.wordToGuess.length === answer.length) {
         // if the answer is correct
-        if (this.wordToGuess == answer.toLocaleLowerCase()) {
+        if (this.wordToGuess == answer) {
           // set the player as having found the correct answer
           // TODO reset playerHasFoundAnswer on round end
           resolve(1);
@@ -753,14 +882,12 @@ export abstract class Room {
   }
 
   private async onTurnEnd(): Promise<void> {
-    if (this._gameEnded) return;
     // calculate the score of the player whose turn was in that turn
     if (this.turnCurrentPlayer) {
       this.turnCurrentPlayer.addScore(this.calculateTurnCurrentPlayerScore());
       // remove the turn state in preparation for the next turn
       this.turnCurrentPlayer.setIsTurn(false);
     }
-
     // go the the turn ended phase
     this._phase = 3;
     this._dispatch.announceTurnScores(this);
@@ -772,11 +899,14 @@ export abstract class Room {
    * @param wasTurn whether it was the player's turn or not
    */
   public onPlayerDisconnected(wasTurn: boolean): void {
+    console.log("onPlayerDisconnected => ending turn");
     // if a player whose turn is currently ongoing, move to the next turn
     if (this._hasTurns) {
       // if the disconnected player was the one playing in the current turn, move to the next turn
       if (wasTurn) {
-        this.onTurnEnd();
+        this.stopWaiting();
+
+        this.abortTurn();
       }
     }
   }
