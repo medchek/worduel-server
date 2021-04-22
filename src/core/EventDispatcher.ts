@@ -2,7 +2,7 @@ import { colorConsole } from "tracer";
 import WebSocket from "ws";
 import { RoomSettings } from "./../config/roomSettings";
 import { Player, PublicMember } from "./Player";
-import { Room, PublicMembers } from "./Room";
+import { Room, PublicMembers, Riddle } from "./Room";
 
 interface Message {
   event: string;
@@ -25,6 +25,7 @@ interface Message {
   reason?: string; // error reason
   playerName?: string;
   hint?: string; // a hint sentence/word/phrase the current player can send to other players for games that feature this option
+  riddle?: string;
 }
 
 interface JoinedMessage {
@@ -252,9 +253,9 @@ export class EventDispatcher {
   /**
    * Event to inform all the players than a new round is about to start
    * @param room the game room object
-   * @param word the word that helps the client to figure out the word to guess
+   * @param content the word that helps the client to figure out the word to guess
    */
-  public announceNewRound(room: Room, word?: string): void {
+  public announceNewRound(room: Room, content?: string | Riddle): void {
     colorConsole().debug("[DEBUG]: Announcing new round");
 
     // only send the word if the room does not feature a turn system
@@ -263,7 +264,16 @@ export class EventDispatcher {
       event: "newRound",
     };
     // only send the word if it's passed
-    if (word) data.word = word;
+    if (content) {
+      // in the shuffler game (id: 1), the content will be the shuffled word to send to the client
+      if (typeof content === "string") {
+        data.word = content;
+      } else {
+        // in the riddles game (id: 3), the content will contain the riddle, and the answer length to help the player figure out the answer
+        data.riddle = content.riddle;
+        data.wordLen = content.answerLen;
+      }
+    }
     this.toAll(room, data);
   }
 

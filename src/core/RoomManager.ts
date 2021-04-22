@@ -1,3 +1,4 @@
+import { Riddles } from "./games/Riddles";
 import { nanoid } from "nanoid";
 import { Player } from "./Player";
 import { PlayerManager } from "./PlayerManager";
@@ -8,7 +9,7 @@ import toInt from "validator/lib/toInt";
 import { Kernel } from "./Kernel";
 // games
 import { Shuffler } from "./games/Shuffler";
-import { Guess } from "./games/Guess";
+// import { Guess } from "./games/Guess";
 
 interface CreateRoomOptions {
   requestedBy: Player;
@@ -84,10 +85,10 @@ export class RoomManager extends Kernel {
         id: roomId,
       };
       // load the game class that corresponds to the gameId
-      // where 1: Shuffler, 2: Guess, 3: ToBeImplemented...etc
-      if (gameId === 1 || gameId === 2) {
+      // where 1: Shuffler, 2: Guess (requires a lot of debugging), 3: Riddles...etc
+      if (gameId === 1 || gameId === 3) {
         const gameRoom =
-          gameId === 1 ? new Shuffler(createRoomOptions) : new Guess(createRoomOptions);
+          gameId === 1 ? new Shuffler(createRoomOptions) : new Riddles(createRoomOptions);
 
         this.addRoom(roomId, gameRoom);
         // also set it as leader since the client is the creator of the room

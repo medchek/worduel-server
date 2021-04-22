@@ -12,8 +12,8 @@ export const defaultRoomSettings: RoomSettings = {
 
 export const gameSettings = [
   { id: 1, value: "shuffler", available: true },
-  { id: 1, value: "guess", available: false },
-  { id: 1, value: "chance", available: false },
+  { id: 2, value: "guess", available: false },
+  { id: 3, value: "riddles", available: true },
   // to be added
 ];
 
