@@ -3,6 +3,7 @@ import { EventListener } from "./EventListener";
 import { PlayerManager } from "./PlayerManager";
 import { RoomManager } from "./RoomManager";
 import { joinRoute } from "./../routes/joinRoute";
+import homeRoute from "./../routes/homeRoute";
 // express
 import express, { Express } from "express";
 import { createServer, IncomingMessage, Server } from "http";
@@ -10,6 +11,7 @@ import { Socket } from "net";
 import cors from "cors";
 import helmet from "helmet";
 import rateLimit from "express-rate-limit";
+import morgan from "morgan";
 // import { RateLimiterMemory } from "rate-limiter-flexible";
 // ws
 import WebSocket from "ws";
@@ -73,7 +75,7 @@ export class GameServer extends Kernel {
     //   process.env.CLIENT_PORT ? `:${process.env.CLIENT_PORT}` : ""
     // }`;
 
-    // middleware
+    // middlewares
     // server.set("trust proxy", 1) // enable for reverse proxy (ngnix, heroku)
     this.app.use(
       cors({
@@ -93,7 +95,7 @@ export class GameServer extends Kernel {
         },
       })
     );
-    // handle http join room request, to check for room existence and availability
+    this.app.use(morgan("combined"));
 
     // create and attach express to the http server
     this.server = createServer(this.app);
@@ -115,7 +117,9 @@ export class GameServer extends Kernel {
    *
    ************************************************************************************************/
   private core(): void {
+    // handle http join room request, to check for room existence and availability
     this.app.use(joinRoute(this.roomList));
+    this.app.use(homeRoute());
     this.handleServerUpgrade();
     this.handleSocketConnection();
     // start the ping/pong connection check
@@ -343,19 +347,28 @@ export class GameServer extends Kernel {
   }
 
   private pulse(): void {
-    colorConsole().debug("preparing server pulse");
-
+    colorConsole().debug("Starting server pulse");
+    const instanceId = process.env.INSTANCE_ID;
+    if (process.env.NODE_ENV === "production" && !instanceId) {
+      throw new Error("Missing or invalid INSTANCE_ID");
+    }
     this.heartbeatInterval = setInterval(() => {
-      colorConsole().debug("pinging the players...");
-      if (this.playerList.allPlayers.size === 0) return;
-      this.playerList.allPlayers.forEach((player) => {
-        if (player.isSocketAlive === false) return player.socket.terminate();
-        // set the beat to false, for the next beat to be possible, if by by the time the method
-        // pulses again, and the pong has not been sent yet from the client, the isSocketAlive is still false, thus leading to closing the connection
-        player.isSocketAlive = false;
-        // ping the player again, and wait for the pong
-        player.socket.ping();
-      });
+      // check to prevent multi instance re-run
+      if (instanceId === "0") {
+        if (this.playerList.allPlayers.size === 0) {
+          return colorConsole().debug("0 players conncted, pinging skipped!");
+        }
+        colorConsole().debug("pinging the players...");
+        this.playerList.allPlayers.forEach((player) => {
+          if (player.isSocketAlive === false) return player.socket.terminate();
+          // set the beat to false, for the next beat to be possible, if by by the time the method
+          // pulses again, and the pong has not been sent yet from the client, the isSocketAlive is still false, thus leading to closing the connection
+          player.isSocketAlive = false;
+          // ping the player again, and wait for the pong
+          player.socket.ping();
+        });
+      }
+      return;
     }, 20 * 1000);
   }
 
