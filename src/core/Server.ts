@@ -54,6 +54,7 @@ export class GameServer extends Kernel {
   private app: Express;
   private server: Server;
   private ws: WebSocket.Server;
+  private heartbeatInterval: NodeJS.Timeout | null = null;
 
   private warden = new Warden();
 
@@ -117,7 +118,11 @@ export class GameServer extends Kernel {
     this.app.use(joinRoute(this.roomList));
     this.handleServerUpgrade();
     this.handleSocketConnection();
+    // start the ping/pong connection check
+    this.pulse();
+    this.handleServerShutDown();
   }
+
   /**
    * Handles the websocket on("connection") event
    */
@@ -190,8 +195,8 @@ export class GameServer extends Kernel {
                 }
 
                 //----------------------------------------------------------------------------------------------------
-                this.onMessage(player, req);
-
+                this.onMessage(player /*, req*/);
+                this.onPong(player);
                 this.onError(player);
                 // handle client disconnection
                 this.onDisconnect(player);
@@ -237,7 +242,7 @@ export class GameServer extends Kernel {
    * @param socket the socket object
    * @param req the request object that is needed to extract the ip
    */
-  protected onMessage(player: Player, req: IncomingMessage): void {
+  protected onMessage(player: Player /*req: IncomingMessage*/): void {
     // TODO rate limit
     const socket = player.socket;
 
@@ -308,6 +313,18 @@ export class GameServer extends Kernel {
       }
     });
   }
+  /**
+   * handles the heartbeat of the websocket
+   */
+  onPong(player: Player): void {
+    player.socket.on("pong", () => {
+      colorConsole().info(`pong received from ${player.username}:${player.ip}`);
+      /** HEATBEAT FUNCTION */
+      // set as still alive from when the next heartbeat exectues,
+      // this will not terminate the socket on the next ping pulse
+      player.isSocketAlive = true;
+    });
+  }
 
   private onError(player: Player): void {
     player.socket.on("error", (error) => {
@@ -323,6 +340,23 @@ export class GameServer extends Kernel {
       this.roomList.handleRoomRemoval(player);
       console.log(`player ${player.username}:${player.id} disconnected`);
     });
+  }
+
+  private pulse(): void {
+    colorConsole().debug("preparing server pulse");
+
+    this.heartbeatInterval = setInterval(() => {
+      colorConsole().debug("pinging the players...");
+      if (this.playerList.allPlayers.size === 0) return;
+      this.playerList.allPlayers.forEach((player) => {
+        if (player.isSocketAlive === false) return player.socket.terminate();
+        // set the beat to false, for the next beat to be possible, if by by the time the method
+        // pulses again, and the pong has not been sent yet from the client, the isSocketAlive is still false, thus leading to closing the connection
+        player.isSocketAlive = false;
+        // ping the player again, and wait for the pong
+        player.socket.ping();
+      });
+    }, 20 * 1000);
   }
 
   /**
@@ -521,6 +555,13 @@ export class GameServer extends Kernel {
     });
   }
 
+  handleServerShutDown(): void {
+    this.ws.on("close", () => {
+      if (this.heartbeatInterval) clearInterval(this.heartbeatInterval);
+      colorConsole().info("Server shut down");
+    });
+  }
+
   /**
    * captures the client ip from either the request header if behind a reverse proxy, or else from the requesting ip directly
    * @param req the http client request
@@ -550,9 +591,13 @@ export class GameServer extends Kernel {
       console.log(
         "Server is correctly running",
         "\n",
-        colors.green(`http(s):      http://localhost:${process.env.PORT}`),
+        colors.green(
+          `http(s):      http://${process.env.HOST || "not-set"}:${process.env.PORT}`
+        ),
         "\n",
-        colors.green(`websocket:    ws://localhost:${process.env.PORT}`),
+        colors.green(
+          `websocket:    ws://${process.env.HOST || "not-set"}:${process.env.PORT}`
+        ),
         "\n",
         colors.blue(
           `expecting requests from origin: ${process.env.CLIENT_ORIGIN}${

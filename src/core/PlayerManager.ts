@@ -19,7 +19,7 @@ export class PlayerManager extends Kernel {
   private playerList: Map<string, Player> = new Map();
   private roomList!: RoomManager;
 
-  get allPlayer(): Map<string, Player> {
+  get allPlayers(): Map<string, Player> {
     return this.playerList;
   }
 

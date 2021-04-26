@@ -18,6 +18,7 @@ export interface PublicMember {
 // export class Player<WebSocket> {
 export class Player {
   private _socket: WebSocket;
+  private _isSocketAlive: boolean;
   private _username: string;
   private _id: string;
   private _ip: string;
@@ -41,11 +42,19 @@ export class Player {
     this._ip = clientIp;
     this._id = id;
     this._username = username;
+    this._isSocketAlive = true;
   }
 
   get socket(): WebSocket {
     return this._socket;
   }
+  get isSocketAlive(): boolean {
+    return this._isSocketAlive;
+  }
+  set isSocketAlive(isAlive: boolean) {
+    this._isSocketAlive = isAlive;
+  }
+
   get id(): string {
     return this._id;
   }
