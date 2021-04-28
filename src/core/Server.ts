@@ -458,7 +458,7 @@ export class GameServer extends Kernel {
     //   req
     // );
 
-    colorConsole().info(`REQUEST HEADERS ${req.headers}`);
+    colorConsole().info(`REQUEST HEADERS ${JSON.stringify(req.headers, null, 4)}`);
     colorConsole().info(`REQUEST DIRECT IP = ${req.socket.remoteAddress}`);
 
     const allowedOrigins = [
