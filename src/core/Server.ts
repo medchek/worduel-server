@@ -458,7 +458,8 @@ export class GameServer extends Kernel {
     //   req
     // );
 
-    colorConsole().debug(`REQUEST RECIEVED FROM ORIGIN = ${req.headers.origin}`);
+    colorConsole().info(`REQUEST HEADERS ${req.headers}`);
+    colorConsole().info(`REQUEST DIRECT IP = ${req.socket.remoteAddress}`);
 
     const allowedOrigins = [
       // "chrome-extension://cbcbkhdmedgianpaifchdaddpnmgnknn", // temp for dev
