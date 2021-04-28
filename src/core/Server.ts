@@ -71,16 +71,14 @@ export class GameServer extends Kernel {
     super();
     this.app = express();
     if (!process.env.CLIENT_ORIGIN) throw new Error("CLIENT ORIGIN UNDEFINED IN ENV");
-    // const allowedOrigin = `${process.env.CLIENT_ORIGIN}${
-    //   process.env.CLIENT_PORT ? `:${process.env.CLIENT_PORT}` : ""
-    // }`;
 
-    // middlewares
+    // Middlewares
     // server.set("trust proxy", 1) // enable for reverse proxy (ngnix, heroku)
     this.app.use(
       cors({
         // allowedHeaders: ["origin"],
-        methods: ["GET"],
+        origin: process.env.CLIENT_HOST || "http://localhost",
+        methods: "GET",
       })
     );
     this.app.use(helmet());
@@ -170,7 +168,7 @@ export class GameServer extends Kernel {
                       // setTimeout(() => {
                       player.setCanSendMessage();
                       player.setAsRoomCreator();
-                      colorConsole().info(`createNewRoom(): room ${room.id}created`);
+                      colorConsole().info(`createNewRoom(): room ${room.id} created`);
                       this.eventDispatcher.roomCreated(player, room);
                       // }, 1000);
                     })
@@ -394,8 +392,6 @@ export class GameServer extends Kernel {
 
     const reasonLog = reason ? `Reason: ${reason}.` : "Reason: No reason provided";
 
-    // if (message) socket.send(JSON.stringify({ type: "error", message }));
-
     if (block) {
       const { ip, blockDurationSeconds } = block;
       // block the socket
@@ -448,19 +444,6 @@ export class GameServer extends Kernel {
   private verifyClientHeaders(req: IncomingMessage): boolean {
     if (!process.env.CLIENT_ORIGIN) throw new Error("CLIENT_ORIGIN env not set!");
     // DEVONLY LOG HEADERS
-    // console.log(
-    //   "[TEST HEADERS] printing request data",
-    //   "ip = ",
-    //   req.socket.remoteAddress,
-    //   ", port = ",
-    //   req.socket.remotePort,
-    //   "FULL REQUEST => ",
-    //   req
-    // );
-
-    colorConsole().info(`REQUEST HEADERS ${JSON.stringify(req.headers, null, 4)}`);
-    colorConsole().info(`REQUEST DIRECT IP = ${req.socket.remoteAddress}`);
-
     const allowedOrigins = [
       // "chrome-extension://cbcbkhdmedgianpaifchdaddpnmgnknn", // temp for dev
       `${process.env.CLIENT_ORIGIN}${
@@ -469,12 +452,19 @@ export class GameServer extends Kernel {
     ];
     // if the requesting socket has no ip address, then block the connection
     if (
-      (!req.socket.remoteAddress &&
-        !req.headers["X-Forwarded-For"] &&
-        !req.headers["X-Forwarded-Port"]) ||
+      !req.socket.remoteAddress ||
+      !req.headers["x-forwarded-for"] ||
+      !req.headers["x-forwarded-port"] ||
+      !req.headers["x-forwarded-proto"] ||
+      req.headers["x-forwarded-proto"] !== "https" ||
+      !req.headers.upgrade ||
+      req.headers.upgrade !== "websocket" ||
       !req.headers.origin ||
       !allowedOrigins.includes(req.headers.origin)
     ) {
+      colorConsole().error(
+        `REQUEST REFUSED! HEADERS = ${JSON.stringify(req.headers, null, 4)}`
+      );
       return false;
     } else {
       return true;
