@@ -428,7 +428,6 @@ export class GameServer extends Kernel {
         colorConsole().info("WS UPGRADE ACCEPTED AT HANDSHAKE");
         // resolve();
       } else {
-        socket.write("test socket");
         socket.destroy();
         colorConsole().error(
           "WS UPGRADE REFUSED",
@@ -446,10 +445,10 @@ export class GameServer extends Kernel {
     // DEVONLY LOG HEADERS
     const allowedOrigins = [
       // "chrome-extension://cbcbkhdmedgianpaifchdaddpnmgnknn", // temp for dev
-      `${process.env.CLIENT_ORIGIN}${
-        process.env.CLIENT_PORT ? `:${process.env.CLIENT_PORT}` : ""
-      }`,
+      `${process.env.CLIENT_ORIGIN}
+      ${process.env.CLIENT_PORT ? `:${process.env.CLIENT_PORT}` : ""}`,
     ];
+    colorConsole().debug(`expecting requests from ${process.env.CLIENT_ORIGIN}...`);
     // if the requesting socket has no ip address, then block the connection
     if (
       !req.socket.remoteAddress ||
@@ -462,13 +461,39 @@ export class GameServer extends Kernel {
       !req.headers.origin ||
       !allowedOrigins.includes(req.headers.origin)
     ) {
-      colorConsole().error(
-        `REQUEST REFUSED! HEADERS = ${JSON.stringify(req.headers, null, 4)}`
-      );
+      this.verifyClientHeadersErrorTracer(req, allowedOrigins);
       return false;
     } else {
       return true;
     }
+  }
+  // track where the verification failed in the below method
+  private verifyClientHeadersErrorTracer(
+    req: IncomingMessage,
+    allowedOrigins: string[]
+  ): void {
+    colorConsole().error("tracing the verification error...");
+    console.warn("remoteAdress:", !req.socket.remoteAddress);
+    console.warn("x-forwarded-for:", !req.headers["x-forwarded-for"]);
+    console.warn("x-forwareded-port:", !req.headers["x-forwarded-port"]);
+    console.warn("x-forwareded-proto:", !req.headers["x-forwarded-proto"]);
+    console.warn(
+      "x-forwareded-proto is https",
+      req.headers["x-forwarded-proto"] !== "https"
+    );
+    console.warn("headers.upgrade", !req.headers.upgrade);
+    console.warn("headers.upgrade = websocket:", req.headers.upgrade !== "websocket");
+    console.warn("headers.origin, !req.headers.origin");
+    if (req.headers.origin) {
+      console.warn(
+        "allowedOringin includes",
+        !allowedOrigins.includes(req.headers.origin)
+      );
+    }
+    colorConsole().error(
+      `REQUEST REFUSED! HEADERS = ${JSON.stringify(req.headers, null, 4)}`
+    );
+    return;
   }
 
   /**
