@@ -483,12 +483,13 @@ export class GameServer extends Kernel {
     );
     console.warn("headers.upgrade", !req.headers.upgrade);
     console.warn("headers.upgrade = websocket:", req.headers.upgrade !== "websocket");
-    console.warn("headers.origin, !req.headers.origin");
+    console.warn("headers.origin", !req.headers.origin);
     if (req.headers.origin) {
-      console.warn(
-        "allowedOringin includes",
-        !allowedOrigins.includes(req.headers.origin)
-      );
+      if (!allowedOrigins.includes(req.headers.origin)) {
+        console.warn(
+          `expected origins "${allowedOrigins.join(", ")} but got ${req.headers.origin}`
+        );
+      }
     }
     colorConsole().error(
       `REQUEST REFUSED! HEADERS = ${JSON.stringify(req.headers, null, 4)}`
@@ -507,7 +508,7 @@ export class GameServer extends Kernel {
    */
   verifyClientUrl(req: IncomingMessage): Promise<VerifiedReqUrlResponse> {
     return new Promise((resolve, reject) => {
-      if (!this.verifyClientHeaders(req)) return reject;
+      // if (!this.verifyClientHeaders(req)) return reject();
       // logic
       if (req.url) {
         const url = decodeURI(req.url.trim());
