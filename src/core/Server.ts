@@ -7,7 +7,7 @@ import homeRoute from "./../routes/homeRoute";
 // express
 import express, { Express } from "express";
 import { createServer, IncomingMessage, Server } from "http";
-import { Socket } from "net";
+// import { Socket } from "net";
 import cors from "cors";
 import helmet from "helmet";
 import rateLimit from "express-rate-limit";
@@ -76,9 +76,7 @@ export class GameServer extends Kernel {
     // server.set("trust proxy", 1) // enable for reverse proxy (ngnix, heroku)
     this.app.use(
       cors({
-        // allowedHeaders: ["origin"],
-        origin: process.env.CLIENT_HOST || "http://localhost",
-        methods: "GET",
+        origin: process.env.CLIENT_HOST,
       })
     );
     this.app.use(helmet());
@@ -118,7 +116,7 @@ export class GameServer extends Kernel {
     // handle http join room request, to check for room existence and availability
     this.app.use(joinRoute(this.roomList));
     this.app.use(homeRoute());
-    this.handleServerUpgrade();
+    // this.handleServerUpgrade();
     this.handleSocketConnection();
     // start the ping/pong connection check
     this.pulse();
@@ -143,79 +141,89 @@ export class GameServer extends Kernel {
           clientIp,
           2 // consume 10 points per request, which equates to 6 attempts per minute
         );
-        // verifying the connection url
-        this.verifyClientUrl(req)
-          .then(async (res: VerifiedReqUrlResponse) => {
-            const { id, requestType, username } = res;
-            const player: Player = this.playerList.createPlayer({
-              socket,
-              clientIp,
-              username,
-            });
-            this.warden
-              .startTracking(player.ip, requestType === "create")
-              .then(() => {
-                // * create room request
-                if (requestType === "create") {
-                  this.roomList
-                    .createNewRoom({
-                      gameId: id,
-                      requestedBy: player,
-                    })
-                    .then((room) => {
-                      // # when the room is successfully created
-                      // DEVONLY timeout
-                      // setTimeout(() => {
-                      player.setCanSendMessage();
-                      player.setAsRoomCreator();
-                      colorConsole().info(`createNewRoom(): room ${room.id} created`);
-                      this.eventDispatcher.roomCreated(player, room);
-                      // }, 1000);
-                    })
-                    .catch((err) => {
-                      colorConsole().error("createNewRoom() error => ", err);
-                    });
-                } else {
-                  // * Join room request
-                  this.roomList
-                    .joinRoom({
-                      roomId: typeof id !== "string" ? id.toString() : id,
-                      requestedBy: player,
-                    })
-                    .then((room) => {
-                      // DEVONLY timeout
-                      // setTimeout(() => {
-                      colorConsole().info(
-                        `joinedRoom(): ${player.username}:${player.id} joined room ${room.id}`
-                      );
-                      this.eventDispatcher.roomJoined(player, room);
-                      // }, 2000);
-                    })
-                    .catch((err) => {
-                      colorConsole().error("joinRoom() error =>", err);
-                    });
-                }
+        // verifying client headers
+        this.verifyClientHeaders(req)
+          .then(() => {
+            // verifying the connection url
+            this.verifyClientUrl(req)
+              .then(async (res: VerifiedReqUrlResponse) => {
+                const { id, requestType, username } = res;
+                const player: Player = this.playerList.createPlayer({
+                  socket,
+                  clientIp,
+                  username,
+                });
+                this.warden
+                  .startTracking(player.ip, requestType === "create")
+                  .then(() => {
+                    // * create room request
+                    if (requestType === "create") {
+                      this.roomList
+                        .createNewRoom({
+                          gameId: id,
+                          requestedBy: player,
+                        })
+                        .then((room) => {
+                          // # when the room is successfully created
+                          // DEVONLY timeout
+                          // setTimeout(() => {
+                          player.setCanSendMessage();
+                          player.setAsRoomCreator();
+                          colorConsole().info(`createNewRoom(): room ${room.id} created`);
+                          this.eventDispatcher.roomCreated(player, room);
+                          // }, 1000);
+                        })
+                        .catch((err) => {
+                          colorConsole().error("createNewRoom() error => ", err);
+                        });
+                    } else {
+                      // * Join room request
+                      this.roomList
+                        .joinRoom({
+                          roomId: typeof id !== "string" ? id.toString() : id,
+                          requestedBy: player,
+                        })
+                        .then((room) => {
+                          // DEVONLY timeout
+                          // setTimeout(() => {
+                          colorConsole().info(
+                            `joinedRoom(): ${player.username}:${player.id} joined room ${room.id}`
+                          );
+                          this.eventDispatcher.roomJoined(player, room);
+                          // }, 2000);
+                        })
+                        .catch((err) => {
+                          colorConsole().error("joinRoom() error =>", err);
+                        });
+                    }
 
-                //----------------------------------------------------------------------------------------------------
-                this.onMessage(player /*, req*/);
-                this.onPong(player);
-                this.onError(player);
-                // handle client disconnection
-                this.onDisconnect(player);
+                    //----------------------------------------------------------------------------------------------------
+                    this.onMessage(player /*, req*/);
+                    this.onPong(player);
+                    this.onError(player);
+                    // handle client disconnection
+                    this.onDisconnect(player);
+                  })
+                  .catch(() => {
+                    colorConsole().error(
+                      `[WARDEN] ip ${clientIp} room create/join quota reached`
+                    );
+                  });
+
+                // end verifyClientUrl then()
               })
-              .catch(() => {
-                colorConsole().error(
-                  `[WARDEN] ip ${clientIp} room create/join quota reached`
-                );
+              .catch((err) => {
+                this.terminateSocket({
+                  socket,
+                });
+                colorConsole().error("Connect url verification failure: ", err);
               });
-
-            // end verifyClientUrl then()
           })
-          .catch((err) => {
+          .catch((headersError) => {
             this.terminateSocket({
               socket,
             });
-            colorConsole().error("connect url verification failure: ", err);
+            colorConsole().error(headersError);
           });
       } catch (rejRes) {
         const remainingTime = Math.ceil(rejRes.msBeforeNext / (1000 * 60));
@@ -354,7 +362,8 @@ export class GameServer extends Kernel {
       // check to prevent multi instance re-run
       if (instanceId === "0") {
         if (this.playerList.allPlayers.size === 0) {
-          return colorConsole().debug("0 players conncted, pinging skipped!");
+          // return colorConsole().debug("0 players conncted, pinging skipped!");
+          return;
         }
         colorConsole().debug("pinging the players...");
         this.playerList.allPlayers.forEach((player) => {
@@ -367,7 +376,7 @@ export class GameServer extends Kernel {
         });
       }
       return;
-    }, 20 * 1000);
+    }, 30 * 1000);
   }
 
   /**
@@ -421,79 +430,93 @@ export class GameServer extends Kernel {
    * This will handle the client request to upgrade to a websocket connection.
    * It will check for the necessary headers and allow or interrupt the connection accordingly
    */
-  private handleServerUpgrade(): void {
-    // return new Promise((resolve, reject) => {
-    this.server.on("upgrade", (req: IncomingMessage, socket: Socket) => {
-      if (this.verifyClientHeaders(req)) {
-        colorConsole().info("WS UPGRADE ACCEPTED AT HANDSHAKE");
-        // resolve();
-      } else {
-        socket.destroy();
-        colorConsole().error(
-          "WS UPGRADE REFUSED",
-          "INVALID ORIGIN OR NO VALID IP ADDRESS FROM CONNECTED SOCKET"
-        );
-        return;
-      }
-    });
-    // });
-  }
+  // private handleServerUpgrade(): void {
+  //   this.server.on("upgrade", (req: IncomingMessage, socket: Socket) => {
+  //     if (this.verifyClientHeaders(req)) {
+  //       colorConsole().info("WS UPGRADE ACCEPTED AT HANDSHAKE");
+  //       // resolve();
+  //     } else {
+  //       socket.destroy();
+  //       colorConsole().error(
+  //         "WS UPGRADE REFUSED",
+  //         "INVALID ORIGIN OR NO VALID IP ADDRESS FROM CONNECTED SOCKET"
+  //       );
+  //       return;
+  //     }
+  //   });
+  // }
 
   // should be fired before allowing the connection
-  private verifyClientHeaders(req: IncomingMessage): boolean {
+  private verifyClientHeaders(req: IncomingMessage): Promise<void> {
+    // private verifyClientHeaders(req: ReqMock): Promise<void> {
     if (!process.env.CLIENT_ORIGIN) throw new Error("CLIENT_ORIGIN env not set!");
-    // DEVONLY LOG HEADERS
-    const allowedOrigins = [
-      // "chrome-extension://cbcbkhdmedgianpaifchdaddpnmgnknn", // temp for dev
-      `${process.env.CLIENT_ORIGIN}
-      ${process.env.CLIENT_PORT ? `:${process.env.CLIENT_PORT}` : ""}`,
-    ];
-    colorConsole().debug(`expecting requests from ${process.env.CLIENT_ORIGIN}...`);
-    // if the requesting socket has no ip address, then block the connection
-    if (
-      !req.socket.remoteAddress ||
-      !req.headers["x-forwarded-for"] ||
-      !req.headers["x-forwarded-port"] ||
-      !req.headers["x-forwarded-proto"] ||
-      req.headers["x-forwarded-proto"] !== "https" ||
-      !req.headers.upgrade ||
-      req.headers.upgrade !== "websocket" ||
-      !req.headers.origin ||
-      !allowedOrigins.includes(req.headers.origin)
-    ) {
-      this.verifyClientHeadersErrorTracer(req, allowedOrigins);
-      return false;
-    } else {
-      return true;
-    }
-  }
-  // track where the verification failed in the below method
-  private verifyClientHeadersErrorTracer(
-    req: IncomingMessage,
-    allowedOrigins: string[]
-  ): void {
-    colorConsole().error("tracing the verification error...");
-    console.warn("remoteAdress:", !req.socket.remoteAddress);
-    console.warn("x-forwarded-for:", !req.headers["x-forwarded-for"]);
-    console.warn("x-forwareded-port:", !req.headers["x-forwarded-port"]);
-    console.warn("x-forwareded-proto:", !req.headers["x-forwarded-proto"]);
-    console.warn(
-      "x-forwareded-proto is https",
-      req.headers["x-forwarded-proto"] !== "https"
-    );
-    console.warn("headers.upgrade", !req.headers.upgrade);
-    console.warn("headers.upgrade = websocket:", req.headers.upgrade !== "websocket");
-    console.warn("headers.origin", !req.headers.origin);
-    if (req.headers.origin) {
-      if (!allowedOrigins.includes(req.headers.origin)) {
-        console.warn(
-          `expected origins "${allowedOrigins.join(", ")} but got ${req.headers.origin}`
-        );
+    console.log("verifying clients headers");
+    return new Promise((resolve, reject) => {
+      // if the requesting socket has no ip address, then block the connection
+      if (
+        !req.socket.remoteAddress ||
+        !req.headers["x-forwarded-for"] ||
+        !req.headers["x-forwarded-port"] ||
+        !req.headers["x-forwarded-proto"] ||
+        req.headers["x-forwarded-proto"] !== "https" ||
+        !req.headers.upgrade ||
+        req.headers.upgrade !== "websocket" ||
+        !req.headers.origin ||
+        req.headers.origin !== process.env.CLIENT_ORIGIN
+      ) {
+        this.verifyClientHeadersErrorTracer(req);
+        reject("ERROR WHILE VERIFIYING CLIENT HEADERS");
+      } else {
+        colorConsole().info("headers verification success");
+        resolve();
+        this.verifyClientHeadersErrorTracer(req);
       }
+    });
+  }
+  // track where the verification failed in the verifyClientHeaders method
+  private verifyClientHeadersErrorTracer(req: IncomingMessage): void {
+    // private verifyClientHeadersErrorTracer(req: ReqMock): void {
+    colorConsole().error("tracing the verification error...");
+    function message(reason: boolean) {
+      return !reason ? "OK" : "Error";
     }
-    colorConsole().error(
-      `REQUEST REFUSED! HEADERS = ${JSON.stringify(req.headers, null, 4)}`
+    console.warn(
+      `remoteAdress: ${message(!req.socket.remoteAddress)} => got ${
+        req.socket.remoteAddress
+      }`
     );
+    console.warn(
+      `x-forwarded-for: ${message(!req.headers["x-forwarded-for"])} => got ${
+        req.headers["x-forwarded-for"]
+      }`
+    );
+    console.warn(
+      `x-forwarded-for: ${message(!req.headers["x-forwarded-port"])} => got ${
+        req.headers["x-forwarded-port"]
+      }`
+    );
+    console.warn(
+      `x-forwarded-for: ${message(!req.headers["x-forwarded-proto"])} => got ${
+        req.headers["x-forwarded-proto"]
+      }`
+    );
+    console.warn(
+      `x-forwareded-proto value: ${message(
+        req.headers["x-forwarded-proto"] !== "https"
+      )} got ${req.headers["x-forwarded-proto"]}`
+    );
+    console.warn(`headers.upgrade: ${message(!req.headers.upgrade)}`);
+    console.warn(
+      `headers.upgrade: ${message(req.headers.upgrade !== "websocket")} => got ${
+        req.headers.upgrade
+      }`
+    );
+    console.warn(`headers.origin: ${message(!req.headers.origin)}`);
+    if (req.headers.origin) {
+      console.warn(
+        `expected origin [${process.env.CLIENT_ORIGIN}] but got [${req.headers.origin}]`
+      );
+    }
     return;
   }
 
@@ -569,13 +592,13 @@ export class GameServer extends Kernel {
                       });
                       colorConsole().info("verifyClientUrl() success => ", url);
                       return;
-                    } else colorConsole().error("invalid room id");
-                  } else colorConsole().error("path not equal join or create");
-                } else colorConsole().error("username regex failure");
-              } else colorConsole().error("username or id not set/not string");
-            } else colorConsole().error("params name not username or id");
-          } else colorConsole().error("path(join/create) and/or params not set");
-        } else colorConsole().error("req.url not set");
+                    } else reject("invalid room id");
+                  } else reject("path not equal join or create");
+                } else reject("username regex failure");
+              } else reject("username or id not set/not string");
+            } else reject("params name not username or id");
+          } else reject("path(join/create) and/or params not set");
+        } else reject("req.url not set");
       }
       // if any of the if statements fail, reject
       reject(
@@ -623,19 +646,11 @@ export class GameServer extends Kernel {
       console.log(
         "Server is correctly running",
         "\n",
-        colors.green(
-          `http(s):      http://${process.env.HOST || "not-set"}:${process.env.PORT}`
-        ),
+        colors.green(`http(s):      http://${process.env.CLIENT_ORIGIN || "not-set"}`),
         "\n",
-        colors.green(
-          `websocket:    ws://${process.env.HOST || "not-set"}:${process.env.PORT}`
-        ),
+        colors.green(`websocket:    ws://${process.env.CLIENT_ORIGIN || "not-set"}`),
         "\n",
-        colors.blue(
-          `expecting requests from origin: ${process.env.CLIENT_ORIGIN}${
-            process.env.CLIENT_PORT ? ":" + process.env.CLIENT_PORT : ""
-          }`
-        )
+        colors.blue(`expecting requests from origin: ${process.env.CLIENT_ORIGIN}`)
       );
     });
   }
