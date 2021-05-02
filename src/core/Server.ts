@@ -69,14 +69,18 @@ export class GameServer extends Kernel {
 
   constructor() {
     super();
-    this.app = express();
     if (!process.env.CLIENT_ORIGIN) throw new Error("CLIENT ORIGIN UNDEFINED IN ENV");
+    if (!process.env.NODE_ENV) throw new Error("NODE_ENV UNDEFINED");
 
+    this.app = express();
     // Middlewares
     // server.set("trust proxy", 1) // enable for reverse proxy (ngnix, heroku)
+    // FIXME
     this.app.use(
       cors({
-        origin: process.env.CLIENT_HOST,
+        origin: process.env.CLIENT_ORIGIN,
+        methods: "GET",
+        optionsSuccessStatus: 200,
       })
     );
     this.app.use(helmet());
@@ -450,9 +454,13 @@ export class GameServer extends Kernel {
   private verifyClientHeaders(req: IncomingMessage): Promise<void> {
     // private verifyClientHeaders(req: ReqMock): Promise<void> {
     if (!process.env.CLIENT_ORIGIN) throw new Error("CLIENT_ORIGIN env not set!");
-    console.log("verifying clients headers");
+    console.log(`verifying client:${req.headers["x-forwarded-for"]} headers`);
     return new Promise((resolve, reject) => {
-      // if the requesting socket has no ip address, then block the connection
+      if (process.env.NODE_ENV !== "production") {
+        // if it's in the dev phase
+        resolve();
+        return;
+      }
       if (
         !req.socket.remoteAddress ||
         !req.headers["x-forwarded-for"] ||
@@ -464,12 +472,12 @@ export class GameServer extends Kernel {
         !req.headers.origin ||
         req.headers.origin !== process.env.CLIENT_ORIGIN
       ) {
+        // if the requesting socket has no ip address, then block the connection
         this.verifyClientHeadersErrorTracer(req);
         reject("ERROR WHILE VERIFIYING CLIENT HEADERS");
       } else {
         colorConsole().info("headers verification success");
         resolve();
-        this.verifyClientHeadersErrorTracer(req);
       }
     });
   }
