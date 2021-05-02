@@ -121,6 +121,8 @@ export class RoomManager extends Kernel {
         if (!room.isFull) {
           // Add the player to the room members
           room.addMember(requestedBy, room.id);
+          // if the game is ongoin when the player join, allow him/her to send messages
+          if (room.hasGameStarted) requestedBy.setCanSendMessage();
           // # RESOLVE
           resolve(room);
         } else {
